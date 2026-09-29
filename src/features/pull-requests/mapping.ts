@@ -1,28 +1,52 @@
 import type {
   CiStatus,
+  FileViewedState,
   PullRequestCardModel,
   PullRequestDiffFile,
+  PullRequestReviewComment,
+  PullRequestReviewDecision,
   PullRequestReviewModel,
+  PullRequestReviewReaction,
+  PullRequestReviewState,
   PullRequestReviewThread,
 } from "./pull-request-model";
+import { compareReactionContents, isReactionContent } from "./reactions.ts";
+
+type RawActor = {
+  avatarUrl?: string | null;
+  login: string;
+} | null;
+
+export type RawReactionGroup = {
+  content: string;
+  reactors: {
+    totalCount: number;
+  };
+  viewerHasReacted: boolean;
+};
+
+export type RawReviewComment = {
+  author: RawActor;
+  body: string;
+  createdAt: string;
+  id: string;
+  line: number | null;
+  originalLine: number | null;
+  path: string | null;
+  pullRequestReview?: {
+    id: string;
+  } | null;
+  reactionGroups?: RawReactionGroup[] | null;
+  replyTo: {
+    id: string;
+  } | null;
+  state?: string;
+  url: string;
+};
 
 export type RawReviewThread = {
   comments?: {
-    nodes: Array<{
-      author: {
-        login: string;
-      } | null;
-      body: string;
-      createdAt: string;
-      id: string;
-      line: number | null;
-      originalLine: number | null;
-      path: string | null;
-      replyTo: {
-        id: string;
-      } | null;
-      url: string;
-    }>;
+    nodes: RawReviewComment[];
   };
   diffSide?: "LEFT" | "RIGHT" | null;
   id?: string;
@@ -35,6 +59,14 @@ export type RawReviewThread = {
   resolvedBy?: {
     login: string;
   } | null;
+  rootComment?: {
+    nodes: Array<{
+      diffHunk: string | null;
+      originalCommit: {
+        oid: string;
+      } | null;
+    }>;
+  };
   startDiffSide?: "LEFT" | "RIGHT" | null;
   startLine?: number | null;
 };
@@ -48,9 +80,7 @@ export type RawReviewThreads = {
 };
 
 export type RawPullRequestBase = {
-  author: {
-    login: string;
-  } | null;
+  author: RawActor;
   baseRefName: string;
   headRefName: string;
   id: string;
@@ -73,11 +103,35 @@ export type RawPullRequest = RawPullRequestBase & {
   reviewThreads: RawReviewThreads;
 };
 
+export type RawPullRequestFiles = {
+  nodes: Array<{
+    path: string;
+    viewerViewedState: string;
+  }>;
+  pageInfo: {
+    endCursor?: string | null;
+    hasNextPage: boolean;
+  };
+  totalCount?: number;
+};
+
 export type RawPullRequestReview = RawPullRequestBase & {
   additions: number;
   changedFiles: number;
   deletions: number;
+  files?: RawPullRequestFiles;
+  headRefOid?: string | null;
+  reviewDecision?: string | null;
   reviewThreads: RawReviewThreads;
+  reviews?: {
+    nodes: Array<{
+      id: string;
+    }>;
+  };
+  viewerDidAuthor?: boolean;
+  viewerLatestReview?: {
+    state: string;
+  } | null;
 };
 
 const successStates = new Set(["NEUTRAL", "SKIPPED", "SUCCESS"]);
@@ -143,6 +197,7 @@ export function mapPullRequestBase(
     number: pr.number,
     title: pr.title,
     url: pr.url,
+    authorAvatarUrl: pr.author?.avatarUrl ?? null,
     authorLogin: pr.author?.login ?? "ghost",
     baseBranch: pr.baseRefName,
     headBranch: pr.headRefName,
@@ -173,34 +228,63 @@ export function mapPullRequestReview(
     changedFiles: pr.changedFiles,
     commentsCount: threads.reduce((count, thread) => count + thread.comments.length, 0),
     deletions: pr.deletions,
+    fileViewedStates: Object.fromEntries(
+      (pr.files?.nodes ?? []).map((file) => [
+        file.path,
+        mapFileViewedState(file.viewerViewedState),
+      ]),
+    ),
     files,
+    headRefOid: pr.headRefOid ?? null,
+    pendingReviewId: pr.reviews?.nodes[0]?.id ?? null,
     pullRequest: mapPullRequestBase(pr, countUnresolvedThreads(pr.reviewThreads)),
+    reviewDecision: mapReviewDecision(pr.reviewDecision),
     threads,
     unresolvedThreads: countUnresolvedThreads(pr.reviewThreads),
+    viewerDidAuthor: pr.viewerDidAuthor ?? false,
+    viewerLatestReviewState: mapReviewState(pr.viewerLatestReview?.state),
   };
 }
 
-function mapReviewThread(thread: RawReviewThread): PullRequestReviewThread {
+const reviewDecisions = new Set(["APPROVED", "CHANGES_REQUESTED", "REVIEW_REQUIRED"]);
+const reviewStates = new Set([
+  "APPROVED",
+  "CHANGES_REQUESTED",
+  "COMMENTED",
+  "DISMISSED",
+  "PENDING",
+]);
+
+export function mapReviewDecision(value: string | null | undefined) {
+  return value && reviewDecisions.has(value) ? (value as PullRequestReviewDecision) : null;
+}
+
+export function mapReviewState(value: string | null | undefined) {
+  return value && reviewStates.has(value) ? (value as PullRequestReviewState) : null;
+}
+
+export function mapFileViewedState(state: string): FileViewedState {
+  if (state === "VIEWED") {
+    return "viewed";
+  }
+
+  return state === "DISMISSED" ? "dismissed" : "unviewed";
+}
+
+export function mapReviewThread(thread: RawReviewThread): PullRequestReviewThread {
   const fallbackPath = thread.path ?? thread.comments?.nodes[0]?.path ?? "unknown";
+  const rootComment = thread.rootComment?.nodes[0];
 
   return {
     id: thread.id ?? `${fallbackPath}:${thread.line ?? thread.originalLine ?? "file"}`,
     comments:
-      thread.comments?.nodes.map((comment) => ({
-        id: comment.id,
-        authorLogin: comment.author?.login ?? "ghost",
-        body: comment.body,
-        createdAt: comment.createdAt,
-        line: comment.line,
-        originalLine: comment.originalLine,
-        path: comment.path ?? fallbackPath,
-        replyToId: comment.replyTo?.id ?? null,
-        url: comment.url,
-      })) ?? [],
+      thread.comments?.nodes.map((comment) => mapReviewComment(comment, fallbackPath)) ?? [],
+    diffHunk: rootComment?.diffHunk ?? null,
     diffSide: thread.diffSide ?? null,
     isOutdated: thread.isOutdated,
     isResolved: thread.isResolved,
     line: thread.line ?? null,
+    originalCommitOid: rootComment?.originalCommit?.oid ?? null,
     originalLine: thread.originalLine ?? null,
     originalStartLine: thread.originalStartLine ?? null,
     path: fallbackPath,
@@ -208,4 +292,46 @@ function mapReviewThread(thread: RawReviewThread): PullRequestReviewThread {
     startDiffSide: thread.startDiffSide ?? null,
     startLine: thread.startLine ?? null,
   };
+}
+
+export function mapReviewComment(
+  comment: RawReviewComment,
+  fallbackPath: string,
+): PullRequestReviewComment {
+  return {
+    id: comment.id,
+    authorAvatarUrl: comment.author?.avatarUrl ?? null,
+    authorLogin: comment.author?.login ?? "ghost",
+    body: comment.body,
+    createdAt: comment.createdAt,
+    isPending: comment.state === "PENDING",
+    line: comment.line,
+    originalLine: comment.originalLine,
+    path: comment.path ?? fallbackPath,
+    reactions: mapReactionGroups(comment.reactionGroups),
+    replyToId: comment.replyTo?.id ?? null,
+    url: comment.url,
+  };
+}
+
+export function getPendingReviewId(comment: RawReviewComment | undefined) {
+  return comment?.state === "PENDING" ? (comment.pullRequestReview?.id ?? null) : null;
+}
+
+export function mapReactionGroups(
+  groups: RawReactionGroup[] | null | undefined,
+): PullRequestReviewReaction[] {
+  return (groups ?? [])
+    .flatMap((group) =>
+      isReactionContent(group.content) && group.reactors.totalCount > 0
+        ? [
+            {
+              content: group.content,
+              count: group.reactors.totalCount,
+              viewerHasReacted: group.viewerHasReacted,
+            },
+          ]
+        : [],
+    )
+    .sort((left, right) => compareReactionContents(left.content, right.content));
 }

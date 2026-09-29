@@ -1,14 +1,16 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { buildRepoSettings, isRepoSettingsComplete } from "./repo-parser";
+import { buildRepoSettings, isRepoSettingsComplete, type RepoSettings } from "./repo-parser";
 import { useGithubCliStatusQuery } from "./github-cli-client";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSettingsStore } from "./settings-store";
 
 type SettingsContainerProps = {
   mode: "edit" | "setup";
+  onCleared?: () => void;
+  onSaved?: (settings: RepoSettings) => void;
 };
 
-export function SettingsContainer({ mode }: SettingsContainerProps) {
+export function SettingsContainer({ mode, onCleared, onSaved }: SettingsContainerProps) {
   const settings = useSettingsStore((store) => store.settings);
   const saveSettings = useSettingsStore((store) => store.saveSettings);
   const clearSettings = useSettingsStore((store) => store.clearSettings);
@@ -31,9 +33,11 @@ export function SettingsContainer({ mode }: SettingsContainerProps) {
     event.preventDefault();
 
     try {
-      buildRepoSettings(form);
+      const nextSettings = buildRepoSettings(form);
+
       saveSettings(form);
       setError(null);
+      onSaved?.(nextSettings);
     } catch (nextError) {
       setError(
         nextError instanceof Error
@@ -49,6 +53,7 @@ export function SettingsContainer({ mode }: SettingsContainerProps) {
       repoInput: "",
     });
     setError(null);
+    onCleared?.();
   }
 
   function handleCancel() {

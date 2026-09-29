@@ -1,4 +1,4 @@
-import { style } from "@vanilla-extract/css";
+import { keyframes, style } from "@vanilla-extract/css";
 import { breakpoints, vars } from "../../app/theme.css";
 
 export const stack = style({
@@ -17,6 +17,80 @@ export const toolbar = style({
       alignItems: "flex-start",
     },
   },
+});
+
+const spin = keyframes({
+  to: {
+    transform: "rotate(360deg)",
+  },
+});
+
+export const syncStatus = style({
+  display: "flex",
+  alignItems: "center",
+  gap: vars.space[12],
+  padding: `10px ${vars.space[12]}`,
+  border: `1px solid ${vars.color.accentSoft}`,
+  borderRadius: vars.radius.md,
+  background: vars.color.accentSoft,
+  color: vars.color.accent,
+  fontSize: vars.fontSize.sm,
+  fontWeight: 600,
+});
+
+export const syncSpinner = style({
+  width: "14px",
+  height: "14px",
+  flexShrink: 0,
+  border: `2px solid ${vars.color.accent}`,
+  borderTopColor: "transparent",
+  borderRadius: vars.radius.pill,
+  animation: `${spin} 800ms linear infinite`,
+  "@media": {
+    "(prefers-reduced-motion: reduce)": {
+      animation: "none",
+    },
+  },
+});
+
+export const syncLabel = style({
+  flex: 1,
+  minWidth: 0,
+});
+
+export const syncCount = style({
+  color: vars.color.textMuted,
+  fontWeight: 500,
+});
+
+export const syncTrack = style({
+  width: "120px",
+  height: "4px",
+  flexShrink: 0,
+  overflow: "hidden",
+  borderRadius: vars.radius.pill,
+  background: vars.color.surface,
+  "@media": {
+    [breakpoints.mobile]: {
+      display: "none",
+    },
+  },
+});
+
+export const syncFill = style({
+  display: "block",
+  height: "100%",
+  background: vars.color.accent,
+  transition: "width 200ms ease",
+});
+
+export const refreshError = style({
+  padding: vars.space[12],
+  border: `1px solid ${vars.color.dangerSoft}`,
+  borderRadius: vars.radius.sm,
+  background: vars.color.dangerSoft,
+  color: vars.color.danger,
+  fontSize: vars.fontSize.sm,
 });
 
 export const summary = style({

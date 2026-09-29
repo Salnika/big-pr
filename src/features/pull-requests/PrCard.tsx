@@ -1,5 +1,5 @@
 import { formatDateTime } from "../../shared/lib/date";
-import { Button } from "../../shared/ui/Button";
+import { Button, ButtonLink } from "../../shared/ui/Button";
 import { Card } from "../../shared/ui/Card";
 import { MetricRow } from "../../shared/ui/MetricRow";
 import { StatusPill } from "../../shared/ui/StatusPill";
@@ -8,10 +8,10 @@ import * as styles from "./PrCard.css";
 
 type PrCardProps = {
   item: PullRequestCardModel;
-  onReview?: (item: PullRequestCardModel) => void;
+  reviewHref?: string;
 };
 
-export function PrCard({ item, onReview }: PrCardProps) {
+export function PrCard({ item, reviewHref }: PrCardProps) {
   const ciBadge = {
     success: { label: "CI passing", tone: "success" as const },
     pending: { label: "CI pending", tone: "warning" as const },
@@ -62,10 +62,10 @@ export function PrCard({ item, onReview }: PrCardProps) {
 
       <div className={styles.footer}>
         <span className={styles.meta}>Review diff, threads, and replies locally.</span>
-        {onReview ? (
-          <Button onClick={() => onReview(item)} size="sm" type="button" variant="primary">
+        {reviewHref ? (
+          <ButtonLink size="sm" to={reviewHref} variant="primary">
             Review
-          </Button>
+          </ButtonLink>
         ) : null}
         <Button
           onClick={() => globalThis.open(item.url, "_blank", "noopener,noreferrer")}

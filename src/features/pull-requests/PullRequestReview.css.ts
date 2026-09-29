@@ -44,7 +44,10 @@ export const title = style({
   lineHeight: 1.15,
 });
 
-export const meta = style({
+export const headerMeta = style({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: vars.space[8],
   color: vars.color.textMuted,
   fontSize: vars.fontSize.sm,
 });
@@ -124,6 +127,70 @@ export const segment = style({
   },
 });
 
+export const authorFilter = style({
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: vars.space[8],
+});
+
+export const authorFilterLabel = style({
+  color: vars.color.textMuted,
+  fontSize: vars.fontSize.xs,
+  fontWeight: 600,
+  textTransform: "uppercase",
+});
+
+export const authorChip = style({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  minHeight: "30px",
+  maxWidth: "100%",
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: vars.radius.pill,
+  background: vars.color.surface,
+  color: vars.color.textStrong,
+  cursor: "pointer",
+  fontSize: vars.fontSize.sm,
+  fontWeight: 500,
+  padding: `0 ${vars.space[12]}`,
+  selectors: {
+    "&:hover": {
+      borderColor: vars.color.textMuted,
+    },
+    "&[aria-pressed='true']": {
+      borderColor: vars.color.accent,
+      background: vars.color.accentSoft,
+      color: vars.color.accent,
+    },
+  },
+});
+
+export const authorChipWithAvatar = style({
+  paddingLeft: vars.space[4],
+});
+
+export const authorChipLogin = style({
+  minWidth: 0,
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+});
+
+export const authorChipCount = style({
+  minWidth: "18px",
+  borderRadius: vars.radius.pill,
+  background: vars.color.surfaceMuted,
+  color: vars.color.textMuted,
+  fontSize: vars.fontSize.xs,
+  fontVariantNumeric: "tabular-nums",
+  fontWeight: 600,
+  lineHeight: "18px",
+  padding: "0 6px",
+  textAlign: "center",
+});
+
 export const inlineError = style({
   padding: vars.space[12],
   border: `1px solid ${vars.color.dangerSoft}`,
@@ -149,7 +216,7 @@ export const fileNav = style({
   position: "sticky",
   top: vars.space[16],
   display: "grid",
-  gridTemplateRows: "auto minmax(0, 1fr)",
+  gridTemplateRows: "auto auto minmax(0, 1fr)",
   gap: vars.space[8],
   maxHeight: "calc(100vh - 32px)",
   overflow: "hidden",
@@ -163,6 +230,29 @@ export const fileNav = style({
       maxHeight: "240px",
     },
   },
+});
+
+export const viewedProgress = style({
+  display: "grid",
+  gap: "6px",
+  padding: `${vars.space[4]} ${vars.space[4]} 0`,
+  color: vars.color.textMuted,
+  fontSize: vars.fontSize.xs,
+  fontWeight: 600,
+});
+
+export const viewedProgressTrack = style({
+  height: "4px",
+  overflow: "hidden",
+  borderRadius: vars.radius.pill,
+  background: vars.color.surfaceMuted,
+});
+
+export const viewedProgressFill = style({
+  display: "block",
+  height: "100%",
+  background: vars.color.success,
+  transition: "width 200ms ease",
 });
 
 export const searchLabel = style({
@@ -286,6 +376,18 @@ export const fileTreeName = style({
   whiteSpace: "nowrap",
 });
 
+export const fileTreeNameViewed = style({
+  color: vars.color.textMuted,
+});
+
+export const fileTreeViewedIcon = style({
+  color: vars.color.success,
+  fontSize: vars.fontSize.xs,
+  fontWeight: 700,
+  lineHeight: 1,
+  textAlign: "center",
+});
+
 export const fileTreeMeta = style({
   color: vars.color.textMuted,
   fontSize: vars.fontSize.xs,
@@ -306,20 +408,93 @@ export const files = style({
 });
 
 export const fileBlock = style({
-  overflow: "hidden",
+  // `clip` rounds the corners like `hidden` without breaking the sticky header,
+  // but unlike `hidden` it lets wide diffs stretch the grid unless the minimum is reset.
+  minWidth: 0,
+  overflow: "clip",
   border: `1px solid ${vars.color.border}`,
   borderRadius: vars.radius.md,
   background: vars.color.surface,
 });
 
 export const fileHeader = style({
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
   display: "flex",
   alignItems: "center",
-  justifyContent: "space-between",
-  gap: vars.space[12],
-  padding: vars.space[12],
+  gap: vars.space[8],
+  padding: `${vars.space[8]} ${vars.space[12]} ${vars.space[8]} ${vars.space[4]}`,
   borderBottom: `1px solid ${vars.color.border}`,
   background: vars.color.surfaceMuted,
+});
+
+export const fileHeaderCollapsed = style({
+  borderBottom: 0,
+});
+
+export const fileCollapseButton = style({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: "28px",
+  height: "28px",
+  flexShrink: 0,
+  border: 0,
+  borderRadius: vars.radius.sm,
+  background: "transparent",
+  cursor: "pointer",
+  selectors: {
+    "&:hover": {
+      background: vars.color.border,
+    },
+  },
+});
+
+export const fileHeaderMeta = style({
+  display: "flex",
+  alignItems: "center",
+  gap: vars.space[12],
+  flexShrink: 0,
+  marginLeft: "auto",
+});
+
+export const fileChangedBadge = style({
+  border: `1px solid ${vars.color.warningSoft}`,
+  borderRadius: vars.radius.pill,
+  background: vars.color.warningSoft,
+  color: vars.color.warning,
+  fontSize: vars.fontSize.xs,
+  fontWeight: 600,
+  padding: `2px ${vars.space[8]}`,
+  whiteSpace: "nowrap",
+});
+
+export const fileViewedToggle = style({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
+  minHeight: "28px",
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: vars.radius.sm,
+  background: vars.color.surface,
+  color: vars.color.textStrong,
+  cursor: "pointer",
+  fontSize: vars.fontSize.xs,
+  fontWeight: 600,
+  padding: `0 ${vars.space[8]}`,
+  userSelect: "none",
+  selectors: {
+    "&:has(input:checked)": {
+      borderColor: vars.color.successSoft,
+      background: vars.color.successSoft,
+      color: vars.color.success,
+    },
+    "&:has(input:disabled)": {
+      cursor: "progress",
+      opacity: 0.7,
+    },
+  },
 });
 
 export const filePath = style({
@@ -339,6 +514,25 @@ export const fileStats = style({
   fontSize: vars.fontSize.xs,
 });
 
+export const filesNotice = style({
+  padding: vars.space[12],
+  border: `1px solid ${vars.color.warningSoft}`,
+  borderRadius: vars.radius.md,
+  background: vars.color.warningSoft,
+  color: vars.color.warning,
+  fontSize: vars.fontSize.sm,
+});
+
+export const fileEmpty = style({
+  padding: vars.space[12],
+  color: vars.color.textMuted,
+  fontSize: vars.fontSize.sm,
+});
+
+export const diffPlaceholder = style({
+  background: `repeating-linear-gradient(${vars.color.surface} 0 26px, ${vars.color.border} 26px 27px)`,
+});
+
 export const diffBody = style({
   overflowX: "auto",
 });
@@ -354,6 +548,58 @@ export const hunkHeader = style({
   color: vars.color.textMuted,
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
   fontSize: vars.fontSize.xs,
+});
+
+export const diffExpander = style({
+  display: "flex",
+  alignItems: "stretch",
+  minHeight: "32px",
+  borderBottom: `1px solid ${vars.color.border}`,
+  background: vars.color.accentSoft,
+});
+
+export const diffExpanderButtons = style({
+  display: "flex",
+  width: "164px",
+  flexShrink: 0,
+  borderRight: `1px solid ${vars.color.border}`,
+});
+
+export const diffExpanderButton = style({
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flex: 1,
+  maxWidth: "48px",
+  border: 0,
+  background: "transparent",
+  color: vars.color.accent,
+  cursor: "pointer",
+  selectors: {
+    "&:hover:not(:disabled)": {
+      background: vars.color.accent,
+      color: vars.color.surface,
+    },
+    "&:focus-visible": {
+      outline: `2px solid ${vars.color.accent}`,
+      outlineOffset: "-2px",
+    },
+    "&:disabled": {
+      cursor: "progress",
+      opacity: 0.6,
+    },
+  },
+});
+
+export const diffExpanderText = style({
+  display: "flex",
+  alignItems: "center",
+  minWidth: 0,
+  padding: `0 ${vars.space[12]}`,
+  color: vars.color.textMuted,
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontSize: vars.fontSize.xs,
+  whiteSpace: "nowrap",
 });
 
 export const diffLine = style({
@@ -483,55 +729,21 @@ export const threadLocation = style({
 });
 
 export const threadLocationGroup = style({
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: vars.space[8],
+  minWidth: 0,
+});
+
+export const threadLocationPath = style({
   display: "inline-flex",
   alignItems: "center",
   minWidth: 0,
+  maxWidth: "100%",
   color: vars.color.textMuted,
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
   fontSize: vars.fontSize.xs,
-});
-
-export const threadCodeToggle = style({
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  width: "24px",
-  height: "24px",
-  border: 0,
-  borderRadius: vars.radius.sm,
-  background: "transparent",
-  color: vars.color.textMuted,
-  cursor: "pointer",
-  flexShrink: 0,
-  selectors: {
-    "&:focus-visible": {
-      outline: `2px solid ${vars.color.accent}`,
-      outlineOffset: "1px",
-    },
-    "&:hover": {
-      background: vars.color.accentSoft,
-      color: vars.color.accent,
-    },
-  },
-});
-
-export const threadCodeChevron = style({
-  width: "7px",
-  height: "7px",
-  borderRight: `2px solid currentColor`,
-  borderBottom: `2px solid currentColor`,
-  transform: "translateY(-1px) rotate(45deg)",
-  transition: "transform 120ms ease",
-});
-
-export const threadCodeChevronOpen = style({
-  transform: "translateY(2px) rotate(225deg)",
-});
-
-export const threadLocationSpacer = style({
-  width: "24px",
-  height: "24px",
-  flexShrink: 0,
 });
 
 export const threadFileButton = style({
@@ -565,9 +777,11 @@ export const threadLocationLine = style({
   color: vars.color.textMuted,
 });
 
-export const threadVsCodeButton = style({
+export const threadHeaderButton = style({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "6px",
   minHeight: "24px",
-  marginLeft: vars.space[8],
   border: `1px solid ${vars.color.border}`,
   borderRadius: vars.radius.sm,
   background: vars.color.surface,
@@ -587,7 +801,17 @@ export const threadVsCodeButton = style({
       borderColor: vars.color.textMuted,
       color: vars.color.accent,
     },
+    "&[aria-expanded='true']": {
+      borderColor: vars.color.accent,
+      background: vars.color.accentSoft,
+      color: vars.color.accent,
+    },
   },
+});
+
+export const threadResolvedBy = style({
+  color: vars.color.textMuted,
+  fontSize: vars.fontSize.xs,
 });
 
 export const threadActions = style({
@@ -597,127 +821,122 @@ export const threadActions = style({
   flexWrap: "wrap",
 });
 
-export const codeDrawer = style({
-  overflow: "hidden",
-  border: `1px solid ${vars.color.border}`,
-  borderRadius: vars.radius.sm,
-  background: vars.color.surfaceMuted,
-});
-
-export const codeDrawerToolbar = style({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: vars.space[8],
-  padding: `${vars.space[8]} ${vars.space[12]}`,
-  borderBottom: `1px solid ${vars.color.border}`,
-});
-
-export const codeDrawerMeta = style({
-  minWidth: 0,
-  overflow: "hidden",
-  color: vars.color.textMuted,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  fontSize: vars.fontSize.xs,
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-});
-
-export const codeDrawerExpand = style({
-  minHeight: "28px",
-  border: `1px solid ${vars.color.border}`,
-  borderRadius: vars.radius.sm,
-  background: vars.color.surface,
-  color: vars.color.textStrong,
-  cursor: "pointer",
-  flexShrink: 0,
-  fontSize: vars.fontSize.xs,
-  fontWeight: 600,
-  padding: `0 ${vars.space[8]}`,
-  selectors: {
-    "&:focus-visible": {
-      outline: `2px solid ${vars.color.accent}`,
-      outlineOffset: "1px",
-    },
-    "&:hover": {
-      borderColor: vars.color.textMuted,
-    },
-  },
-});
-
-export const codeDrawerBody = style({
-  maxHeight: "420px",
-  overflow: "auto",
-});
-
-export const codeDrawerHunkHeader = style({
-  minWidth: "560px",
-  padding: `${vars.space[8]} ${vars.space[12]}`,
-  borderBottom: `1px solid ${vars.color.border}`,
-  color: vars.color.textMuted,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  fontSize: vars.fontSize.xs,
-});
-
-export const codeDrawerLine = style({
-  display: "grid",
-  gridTemplateColumns: "56px 56px minmax(0, 1fr)",
-  minWidth: "560px",
-  minHeight: "24px",
-  borderBottom: `1px solid ${vars.color.border}`,
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-  fontSize: vars.fontSize.xs,
-});
-
-export const codeDrawerLineTarget = style({
-  boxShadow: `inset 3px 0 0 ${vars.color.accent}`,
-});
-
-export const codeDrawerLineNumber = style({
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "flex-end",
-  padding: `0 ${vars.space[8]}`,
-  borderRight: `1px solid ${vars.color.border}`,
-  color: vars.color.textMuted,
-  fontVariantNumeric: "tabular-nums",
-  userSelect: "none",
-});
-
-export const codeDrawerCode = style({
-  display: "flex",
-  gap: vars.space[4],
-  margin: 0,
-  minWidth: 0,
-  overflow: "visible",
-  padding: `4px ${vars.space[12]}`,
-  whiteSpace: "pre",
-});
-
-export const codeDrawerPrefix = style({
-  color: vars.color.textMuted,
-  userSelect: "none",
-});
-
 export const comments = style({
   display: "grid",
-  gap: vars.space[8],
+  gap: vars.space[4],
 });
 
 export const comment = style({
   display: "grid",
+  gridTemplateColumns: "28px minmax(0, 1fr)",
+  alignItems: "start",
+  gap: vars.space[12],
+  padding: `10px ${vars.space[12]}`,
+  border: "1px solid transparent",
+  borderRadius: vars.radius.md,
+});
+
+export const commentAlternate = style({
+  borderColor: vars.color.border,
+  background: vars.color.surfaceMuted,
+});
+
+// Pending comments are drafts: only their author sees them until the review is submitted.
+export const commentPending = style({
+  borderColor: vars.color.warningSoft,
+  borderStyle: "dashed",
+  background: vars.color.surface,
+  boxShadow: `inset 3px 0 0 ${vars.color.warning}`,
+});
+
+export const commentContent = style({
+  display: "grid",
   gap: vars.space[4],
-  paddingLeft: vars.space[12],
-  borderLeft: `2px solid ${vars.color.border}`,
+  minWidth: 0,
 });
 
 export const commentMeta = style({
   display: "flex",
   alignItems: "center",
   gap: vars.space[8],
+  minHeight: "28px",
   color: vars.color.textMuted,
   flexWrap: "wrap",
   fontSize: vars.fontSize.xs,
+});
+
+export const commentAuthor = style({
+  color: vars.color.textStrong,
+});
+
+export const commentMetaActions = style({
+  display: "inline-flex",
+  marginLeft: "auto",
+});
+
+export const commentMetaButton = style({
+  minHeight: "24px",
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: vars.radius.sm,
+  background: vars.color.surface,
+  color: vars.color.textMuted,
+  cursor: "pointer",
+  fontSize: vars.fontSize.xs,
+  fontWeight: 500,
+  padding: `0 ${vars.space[8]}`,
+  selectors: {
+    "&:hover:not(:disabled)": {
+      color: vars.color.textStrong,
+    },
+    "&:disabled": {
+      cursor: "wait",
+      opacity: 0.6,
+    },
+  },
+});
+
+export const commentMetaButtonDanger = style({
+  borderColor: vars.color.dangerSoft,
+  background: vars.color.dangerSoft,
+  color: vars.color.danger,
+  selectors: {
+    "&:hover:not(:disabled)": {
+      color: vars.color.danger,
+    },
+  },
+});
+
+export const commentDeleteConfirm = style({
+  display: "inline-flex",
+  alignItems: "center",
+  gap: vars.space[4],
+  color: vars.color.danger,
+});
+
+export const pendingBadge = style({
+  display: "inline-flex",
+  alignItems: "center",
+  border: `1px solid ${vars.color.warningSoft}`,
+  borderRadius: vars.radius.pill,
+  background: vars.color.warningSoft,
+  color: vars.color.warning,
+  fontSize: "11px",
+  fontWeight: 600,
+  lineHeight: "18px",
+  padding: "0 6px",
+});
+
+export const authorBadge = style({
+  display: "inline-flex",
+  alignItems: "center",
+  border: `1px solid ${vars.color.border}`,
+  borderRadius: vars.radius.pill,
+  background: vars.color.surface,
+  color: vars.color.textMuted,
+  fontSize: "11px",
+  fontWeight: 600,
+  lineHeight: "18px",
+  padding: "0 6px",
 });
 
 export const commentBody = style({
@@ -808,6 +1027,17 @@ globalStyle(`${commentBody} th`, {
   textAlign: "left",
 });
 
+globalStyle(
+  `${commentAlternate} ${commentBody} code, ${commentAlternate} ${commentBody} pre, ${commentAlternate} ${commentBody} th`,
+  {
+    background: vars.color.surface,
+  },
+);
+
+globalStyle(`${commentAlternate} ${commentBody} pre code`, {
+  background: "transparent",
+});
+
 export const replyForm = style({
   display: "grid",
   gap: vars.space[8],
@@ -825,6 +1055,7 @@ export const textarea = style({
 export const replyActions = style({
   display: "flex",
   justifyContent: "flex-end",
+  gap: vars.space[8],
 });
 
 export const commentsView = style({

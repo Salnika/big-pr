@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { formatDateTime } from "../../shared/lib/date";
-import { Button } from "../../shared/ui/Button";
+import { Button, ButtonLink } from "../../shared/ui/Button";
 import { StatusPill } from "../../shared/ui/StatusPill";
 import { PrCard } from "./PrCard";
 import type { PullRequestCardModel } from "./pull-request-model";
 import * as styles from "./PrGrid.css";
+import type { SyncProgress } from "./use-cached-resource";
 
 type ViewMode = "grid" | "list";
 type SortMode = "updated-desc" | "updated-asc" | "comments-desc" | "number-desc";
@@ -17,22 +18,26 @@ type Filters = {
 };
 
 type PrGridProps = {
+  getReviewHref?: (item: PullRequestCardModel) => string;
   hasMore: boolean;
   isRefreshing: boolean;
   items: PullRequestCardModel[];
   lastRefreshedAt: string | null;
   onRefresh: () => void;
-  onSelectPullRequest?: (item: PullRequestCardModel) => void;
+  refreshError?: Error | null;
+  syncProgress?: SyncProgress | null;
   totalCount: number;
 };
 
 export function PrGrid({
+  getReviewHref,
   hasMore,
   isRefreshing,
   items,
   lastRefreshedAt,
   onRefresh,
-  onSelectPullRequest,
+  refreshError = null,
+  syncProgress = null,
   totalCount,
 }: PrGridProps) {
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
@@ -72,6 +77,14 @@ export function PrGrid({
           {isRefreshing ? "Refreshing…" : "Refresh PR list"}
         </Button>
       </div>
+
+      {isRefreshing ? <SyncStatus progress={syncProgress} /> : null}
+
+      {refreshError ? (
+        <div className={styles.refreshError} role="alert">
+          Could not finish syncing the list. {refreshError.message}
+        </div>
+      ) : null}
 
       <div className={styles.controls}>
         <div className={styles.controlGroup} aria-label="View mode">
@@ -155,13 +168,13 @@ export function PrGrid({
         viewMode === "grid" ? (
           <div className={styles.grid}>
             {visibleItems.map((item) => (
-              <PrCard item={item} key={item.id} onReview={onSelectPullRequest} />
+              <PrCard item={item} key={item.id} reviewHref={getReviewHref?.(item)} />
             ))}
           </div>
         ) : (
           <ul className={styles.list}>
             {visibleItems.map((item) => (
-              <PrListItem item={item} key={item.id} onReview={onSelectPullRequest} />
+              <PrListItem item={item} key={item.id} reviewHref={getReviewHref?.(item)} />
             ))}
           </ul>
         )
@@ -169,6 +182,31 @@ export function PrGrid({
         <div className={styles.filteredEmpty}>No pull requests match the current filters.</div>
       )}
     </section>
+  );
+}
+
+function SyncStatus({ progress }: { progress: SyncProgress | null }) {
+  return (
+    <div className={styles.syncStatus} role="status">
+      <span aria-hidden="true" className={styles.syncSpinner} />
+      <span className={styles.syncLabel}>
+        Synchronising…
+        {progress ? (
+          <span className={styles.syncCount}>
+            {" "}
+            {progress.completed} of {progress.total} pull requests updated
+          </span>
+        ) : null}
+      </span>
+      {progress?.total ? (
+        <span aria-hidden="true" className={styles.syncTrack}>
+          <span
+            className={styles.syncFill}
+            style={{ width: `${Math.round((progress.completed / progress.total) * 100)}%` }}
+          />
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -193,13 +231,7 @@ function FilterToggle({
   );
 }
 
-function PrListItem({
-  item,
-  onReview,
-}: {
-  item: PullRequestCardModel;
-  onReview?: (item: PullRequestCardModel) => void;
-}) {
+function PrListItem({ item, reviewHref }: { item: PullRequestCardModel; reviewHref?: string }) {
   const ciBadge = {
     success: { label: "CI passing", tone: "success" as const },
     pending: { label: "CI pending", tone: "warning" as const },
@@ -234,10 +266,10 @@ function PrListItem({
         <span>{item.unresolvedThreads > 99 ? "99+" : item.unresolvedThreads} comments</span>
       </div>
       <div className={styles.listActions}>
-        {onReview ? (
-          <Button onClick={() => onReview(item)} size="sm" type="button" variant="primary">
+        {reviewHref ? (
+          <ButtonLink size="sm" to={reviewHref} variant="primary">
             Review
-          </Button>
+          </ButtonLink>
         ) : null}
         <Button
           onClick={() => globalThis.open(item.url, "_blank", "noopener,noreferrer")}

@@ -1,43 +1,53 @@
-import { useQuery } from "@tanstack/react-query";
-import { useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { RepoSettings } from "../settings/repo-parser";
 import { fetchPullRequestReview } from "./github-client";
-import { readPullRequestReviewCache, writePullRequestReviewCache } from "./pull-requests-cache";
+import type { PullRequestReviewModel } from "./pull-request-model";
+import {
+  pruneCachedRepositoryFiles,
+  readPullRequestReviewCache,
+  writePullRequestReviewCache,
+} from "./pull-requests-cache";
+import { useCachedResource } from "./use-cached-resource";
+import { syncPullRequestInOverview } from "./use-pull-requests-query";
 
-export function getPullRequestReviewQueryKey(settings: RepoSettings, number: number) {
-  return ["pull-request-review", settings.owner, settings.repo, number] as const;
+type Repository = Pick<RepoSettings, "owner" | "repo">;
+
+export function getPullRequestReviewQueryKey(repository: Repository, number: number) {
+  return ["pull-request-review", repository.owner, repository.repo, number] as const;
 }
 
-export function usePullRequestReviewQuery(settings: RepoSettings, number: number) {
-  const cachedResult = useMemo(
-    () => readPullRequestReviewCache(settings, number),
-    [number, settings.owner, settings.repo],
-  );
-  const query = useQuery({
-    queryKey: getPullRequestReviewQueryKey(settings, number),
-    enabled: false,
-    queryFn: () => fetchPullRequestReview(settings, number),
-    initialData: cachedResult?.data,
-    initialDataUpdatedAt: cachedResult?.dataUpdatedAt,
-    refetchInterval: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
-    staleTime: Infinity,
+export function getRepositoryFilesQueryKey(repository: Repository, number: number) {
+  return ["repository-file", repository.owner, repository.repo, number] as const;
+}
+
+export function usePullRequestReviewQuery(repository: RepoSettings, number: number) {
+  const queryClient = useQueryClient();
+
+  return useCachedResource({
+    fetchFresh: () => fetchPullRequestReview(repository, number),
+    onRefreshed: async (review) => {
+      const keptRefs = getReviewCommitOids(review);
+
+      queryClient.removeQueries({
+        predicate: (query) => !keptRefs.has(String(query.queryKey[4])),
+        queryKey: getRepositoryFilesQueryKey(repository, number),
+      });
+      await Promise.all([
+        pruneCachedRepositoryFiles(repository, number, keptRefs),
+        syncPullRequestInOverview(queryClient, repository, review.pullRequest),
+      ]);
+    },
+    queryKey: getPullRequestReviewQueryKey(repository, number),
+    readCached: () => readPullRequestReviewCache(repository, number),
+    writeCached: (entry) => writePullRequestReviewCache(repository, number, entry),
   });
+}
 
-  useEffect(() => {
-    if (!query.data) {
-      return;
-    }
-
-    writePullRequestReviewCache({
-      data: query.data,
-      dataUpdatedAt: query.dataUpdatedAt,
-      number,
-      settings,
-    });
-  }, [number, query.data, query.dataUpdatedAt, settings]);
-
-  return query;
+// Files are cached per commit, so only the commits the refreshed review still points at stay useful.
+function getReviewCommitOids(review: PullRequestReviewModel) {
+  return new Set(
+    [review.headRefOid, ...review.threads.map((thread) => thread.originalCommitOid)].filter(
+      (oid): oid is string => Boolean(oid),
+    ),
+  );
 }

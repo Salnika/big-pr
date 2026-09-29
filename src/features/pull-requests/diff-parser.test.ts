@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vite-plus/test";
-import { parseUnifiedDiff } from "./diff-parser";
+import { parseDiffHunk, parsePullRequestFiles, parseUnifiedDiff } from "./diff-parser";
 
 describe("parseUnifiedDiff", () => {
   test("parses changed files, hunks, and line numbers", () => {
@@ -99,5 +99,128 @@ rename to after.ts
       { oldPath: "old.ts", path: "old.ts", status: "deleted" },
       { oldPath: "before.ts", path: "after.ts", status: "renamed" },
     ]);
+  });
+
+  test("reads removed and added lines that look like file headers as code", () => {
+    const [file] = parseUnifiedDiff(`diff --git a/schema.sql b/schema.sql
+--- a/schema.sql
++++ b/schema.sql
+@@ -1,2 +1,2 @@
+--- legacy column
++++ counter;
+ select 1;
+`);
+
+    expect(file).toMatchObject({
+      additions: 1,
+      deletions: 1,
+      oldPath: "schema.sql",
+      path: "schema.sql",
+    });
+    expect(file?.hunks[0]?.lines.map((line) => [line.type, line.content])).toEqual([
+      ["deletion", "-- legacy column"],
+      ["addition", "++ counter;"],
+      ["context", "select 1;"],
+    ]);
+  });
+
+  test("keeps line numbers on context lines that start with a backslash", () => {
+    const [file] = parseUnifiedDiff(`diff --git a/doc.tex b/doc.tex
+--- a/doc.tex
++++ b/doc.tex
+@@ -4,2 +4,2 @@
+ \\begin{document}
+-old
++new
+`);
+
+    expect(file?.hunks[0]?.lines.map((line) => [line.oldLineNumber, line.newLineNumber])).toEqual([
+      [4, 4],
+      [5, null],
+      [null, 5],
+    ]);
+  });
+});
+
+describe("parsePullRequestFiles", () => {
+  test("builds diff files from GitHub's per-file patches", () => {
+    const files = parsePullRequestFiles([
+      {
+        additions: 2,
+        deletions: 1,
+        filename: "src/app.ts",
+        patch:
+          "@@ -1,2 +1,3 @@\n const a = 1;\n-const b = 2;\n+const b = 3;\n+const c = 4;\n@@ -9 +10 @@\n-old\n+new",
+        status: "modified",
+      },
+      {
+        additions: 1,
+        deletions: 0,
+        filename: "src/new.ts",
+        patch: "@@ -0,0 +1 @@\n+new",
+        status: "added",
+      },
+      {
+        additions: 0,
+        deletions: 1,
+        filename: "src/old.ts",
+        patch: "@@ -1 +0,0 @@\n-old",
+        status: "removed",
+      },
+      {
+        additions: 0,
+        deletions: 0,
+        filename: "src/after.ts",
+        previous_filename: "src/before.ts",
+        status: "renamed",
+      },
+    ]);
+
+    expect(files.map(({ oldPath, path, status }) => ({ oldPath, path, status }))).toEqual([
+      { oldPath: "src/app.ts", path: "src/app.ts", status: "modified" },
+      { oldPath: null, path: "src/new.ts", status: "added" },
+      { oldPath: "src/old.ts", path: "src/old.ts", status: "deleted" },
+      { oldPath: "src/before.ts", path: "src/after.ts", status: "renamed" },
+    ]);
+    expect(files[0]?.hunks.map((hunk) => [hunk.id, hunk.lines.length])).toEqual([
+      ["src/app.ts:hunk:0", 4],
+      ["src/app.ts:hunk:1", 2],
+    ]);
+    expect(
+      files[0]?.hunks[1]?.lines.map((line) => [line.oldLineNumber, line.newLineNumber]),
+    ).toEqual([
+      [9, null],
+      [null, 10],
+    ]);
+    expect(files[3]?.hunks).toEqual([]);
+  });
+});
+
+describe("parseDiffHunk", () => {
+  test("parses a standalone review comment diff hunk", () => {
+    const hunk = parseDiffHunk(
+      [
+        "@@ -10,3 +10,4 @@ export function review() {",
+        " const user = getUser();",
+        "-return false;",
+        "+const ready = Boolean(user);",
+        "+return ready;",
+      ].join("\n"),
+      "thread-1:original",
+    );
+
+    expect(hunk?.id).toBe("thread-1:original:hunk:0");
+    expect(
+      hunk?.lines.map((line) => [line.type, line.oldLineNumber, line.newLineNumber, line.content]),
+    ).toEqual([
+      ["context", 10, 10, "const user = getUser();"],
+      ["deletion", 11, null, "return false;"],
+      ["addition", null, 11, "const ready = Boolean(user);"],
+      ["addition", null, 12, "return ready;"],
+    ]);
+  });
+
+  test("ignores text without a hunk header", () => {
+    expect(parseDiffHunk("+const orphan = true;", "thread-1")).toBeNull();
   });
 });
