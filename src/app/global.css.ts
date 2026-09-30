@@ -32,6 +32,11 @@ globalStyle("a", {
   textDecoration: "none",
 });
 
+// Browsers default tabs to 8 columns, which pushes indented code far right in narrow diff columns.
+globalStyle("pre", {
+  tabSize: 4,
+});
+
 globalStyle("img", {
   display: "block",
   maxWidth: "100%",

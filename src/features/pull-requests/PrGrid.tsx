@@ -1,21 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { formatDateTime } from "../../shared/lib/date";
 import { Button, ButtonLink } from "../../shared/ui/Button";
 import { StatusPill } from "../../shared/ui/StatusPill";
+import {
+  noPullRequestFilters,
+  type PullRequestFilters,
+  type PullRequestSortMode,
+  usePreferencesStore,
+} from "../settings/preferences-store";
 import { PrCard } from "./PrCard";
 import type { PullRequestCardModel } from "./pull-request-model";
 import * as styles from "./PrGrid.css";
 import type { SyncProgress } from "./use-cached-resource";
-
-type ViewMode = "grid" | "list";
-type SortMode = "updated-desc" | "updated-asc" | "comments-desc" | "number-desc";
-
-type Filters = {
-  comments: boolean;
-  conflicts: boolean;
-  drafts: boolean;
-  failingCi: boolean;
-};
 
 type PrGridProps = {
   getReviewHref?: (item: PullRequestCardModel) => string;
@@ -40,14 +36,13 @@ export function PrGrid({
   syncProgress = null,
   totalCount,
 }: PrGridProps) {
-  const [viewMode, setViewMode] = useState<ViewMode>("grid");
-  const [sortMode, setSortMode] = useState<SortMode>("updated-desc");
-  const [filters, setFilters] = useState<Filters>({
-    comments: false,
-    conflicts: false,
-    drafts: false,
-    failingCi: false,
-  });
+  // The display, sort, and filters are saved preferences, kept from one visit to the next.
+  const viewMode = usePreferencesStore((store) => store.preferences.pullRequestViewMode);
+  const sortMode = usePreferencesStore((store) => store.preferences.pullRequestSortMode);
+  const filters = usePreferencesStore((store) => store.preferences.pullRequestFilters);
+  const setPreference = usePreferencesStore((store) => store.setPreference);
+  const setFilter = (key: keyof PullRequestFilters, checked: boolean) =>
+    setPreference("pullRequestFilters", { ...filters, [key]: checked });
   const summary = hasMore
     ? "Showing the 50 most recently updated open pull requests."
     : "Showing all currently open pull requests.";
@@ -91,7 +86,7 @@ export function PrGrid({
           <button
             aria-pressed={viewMode === "grid"}
             className={styles.segment}
-            onClick={() => setViewMode("grid")}
+            onClick={() => setPreference("pullRequestViewMode", "grid")}
             type="button"
           >
             Grid
@@ -99,7 +94,7 @@ export function PrGrid({
           <button
             aria-pressed={viewMode === "list"}
             className={styles.segment}
-            onClick={() => setViewMode("list")}
+            onClick={() => setPreference("pullRequestViewMode", "list")}
             type="button"
           >
             List
@@ -110,22 +105,22 @@ export function PrGrid({
           <FilterToggle
             checked={filters.failingCi}
             label="CI failing"
-            onChange={(checked) => setFilters((current) => ({ ...current, failingCi: checked }))}
+            onChange={(checked) => setFilter("failingCi", checked)}
           />
           <FilterToggle
             checked={filters.conflicts}
             label="Conflicts"
-            onChange={(checked) => setFilters((current) => ({ ...current, conflicts: checked }))}
+            onChange={(checked) => setFilter("conflicts", checked)}
           />
           <FilterToggle
             checked={filters.comments}
             label="Comments"
-            onChange={(checked) => setFilters((current) => ({ ...current, comments: checked }))}
+            onChange={(checked) => setFilter("comments", checked)}
           />
           <FilterToggle
             checked={filters.drafts}
             label="Drafts"
-            onChange={(checked) => setFilters((current) => ({ ...current, drafts: checked }))}
+            onChange={(checked) => setFilter("drafts", checked)}
           />
         </div>
 
@@ -133,7 +128,9 @@ export function PrGrid({
           <span>Sort</span>
           <select
             className={styles.select}
-            onChange={(event) => setSortMode(event.target.value as SortMode)}
+            onChange={(event) =>
+              setPreference("pullRequestSortMode", event.target.value as PullRequestSortMode)
+            }
             value={sortMode}
           >
             <option value="updated-desc">Newest updated</option>
@@ -149,14 +146,7 @@ export function PrGrid({
         {hasActiveFilters ? (
           <button
             className={styles.clearFilters}
-            onClick={() =>
-              setFilters({
-                comments: false,
-                conflicts: false,
-                drafts: false,
-                failingCi: false,
-              })
-            }
+            onClick={() => setPreference("pullRequestFilters", noPullRequestFilters)}
             type="button"
           >
             Clear filters
@@ -284,7 +274,7 @@ function PrListItem({ item, reviewHref }: { item: PullRequestCardModel; reviewHr
   );
 }
 
-function filterPullRequests(items: PullRequestCardModel[], filters: Filters) {
+function filterPullRequests(items: PullRequestCardModel[], filters: PullRequestFilters) {
   return items.filter((item) => {
     if (filters.failingCi && item.ciStatus !== "failure") {
       return false;
@@ -306,7 +296,7 @@ function filterPullRequests(items: PullRequestCardModel[], filters: Filters) {
   });
 }
 
-function sortPullRequests(items: PullRequestCardModel[], sortMode: SortMode) {
+function sortPullRequests(items: PullRequestCardModel[], sortMode: PullRequestSortMode) {
   return [...items].sort((left, right) => {
     if (sortMode === "updated-asc") {
       return Date.parse(left.updatedAt) - Date.parse(right.updatedAt);

@@ -18,6 +18,29 @@ describe("PrGrid", () => {
     expect(screen.getByText("1 of 3 displayed")).toBeTruthy();
   });
 
+  test("keeps the display, sort, and filters for the next visit", async () => {
+    const { unmount } = renderGrid();
+
+    await userEvent.click(screen.getByRole("button", { name: "List" }));
+    await userEvent.selectOptions(screen.getByLabelText("Sort"), "number-desc");
+    await userEvent.click(screen.getByLabelText("Conflicts"));
+
+    unmount();
+    renderGrid();
+
+    expect(screen.getByRole("button", { name: "List" }).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByLabelText("Sort") as HTMLSelectElement).value).toBe("number-desc");
+    expect((screen.getByLabelText("Conflicts") as HTMLInputElement).checked).toBe(true);
+    expect(window.localStorage.getItem("pr-status:preferences")).toContain(
+      '"pullRequestViewMode":"list"',
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+
+    expect((screen.getByLabelText("Conflicts") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByText("3 displayed")).toBeTruthy();
+  });
+
   test("sorts visible pull requests", async () => {
     renderGrid();
 

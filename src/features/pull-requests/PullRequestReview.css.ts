@@ -611,6 +611,31 @@ export const diffLine = style({
   fontSize: vars.fontSize.xs,
 });
 
+export const splitDiffLine = style({
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  borderBottom: `1px solid ${vars.color.border}`,
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+  fontSize: vars.fontSize.xs,
+});
+
+export const splitDiffCell = style({
+  display: "grid",
+  gridTemplateColumns: "32px 52px minmax(0, 1fr)",
+  minWidth: 0,
+  minHeight: "26px",
+  selectors: {
+    "&:last-child": {
+      borderLeft: `1px solid ${vars.color.border}`,
+    },
+  },
+});
+
+// The side where a line doesn't exist, like the new side of a deleted line.
+export const splitDiffCellEmpty = style({
+  background: vars.color.surfaceMuted,
+});
+
 export const lineCommentCell = style({
   display: "flex",
   alignItems: "center",
@@ -634,7 +659,7 @@ export const lineCommentButton = style({
   opacity: 0,
   transition: "opacity 120ms ease, border-color 120ms ease",
   selectors: {
-    [`${diffLine}:hover &`]: {
+    [`${diffLine}:hover &, ${splitDiffCell}:hover &`]: {
       opacity: 1,
     },
     "&:focus-visible": {
@@ -674,6 +699,12 @@ export const codeLine = style({
   overflow: "visible",
   padding: `4px ${vars.space[12]}`,
   whiteSpace: "pre",
+});
+
+// Each side of the split view is half as wide, so long lines wrap instead of running over.
+export const codeLineWrapped = style({
+  whiteSpace: "pre-wrap",
+  overflowWrap: "anywhere",
 });
 
 export const inlineThread = style({

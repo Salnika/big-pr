@@ -24,6 +24,9 @@ import {
   getRevealedGapLines,
   type RevealedGap,
 } from "./diff-expansion";
+import { getLineSyntaxKey, useDiffSyntax } from "./diff-syntax";
+import { type DiffViewMode, useDiffViewMode } from "./diff-view-mode";
+import { HighlightedCode } from "./HighlightedCode";
 import type {
   CreatePullRequestReviewThreadInput,
   FileViewedState,
@@ -36,12 +39,16 @@ import type {
 } from "./pull-request-model";
 import * as styles from "./PullRequestReview.css";
 import type { ReactionContent } from "./reactions";
+import { buildSplitRows } from "./split-diff";
+import { usePreferencesStore } from "../settings/preferences-store";
 import { SubmitReview } from "./SubmitReview";
+import type { SyntaxToken } from "./syntax-token";
 import { type LoadFileContent, ThreadCodePreview } from "./ThreadCodePreview";
 
 export type ReviewTab = "comments" | "files";
 type ThreadFilter = "all" | "pending" | "resolved" | "unresolved";
 type PendingCreateThread = Pick<CreatePullRequestReviewThreadInput, "line" | "path" | "side">;
+type CommentTarget = Pick<CreatePullRequestReviewThreadInput, "line" | "side">;
 type ThreadFileReference = {
   file: PullRequestDiffFile;
   fileId: string;
@@ -141,7 +148,18 @@ export function PullRequestReview({
   tab,
 }: PullRequestReviewProps) {
   const [pendingFileScrollId, setPendingFileScrollId] = useState<string | null>(null);
-  const [threadFilter, setThreadFilter] = useState<ThreadFilter>("all");
+  const savedThreadFilter = usePreferencesStore((store) => store.preferences.threadFilter);
+  const setPreference = usePreferencesStore((store) => store.setPreference);
+  const [isShowingPending, setIsShowingPending] = useState(false);
+  const threadFilter: ThreadFilter = isShowingPending ? "pending" : savedThreadFilter;
+  const setThreadFilter = (filter: ThreadFilter) => {
+    setIsShowingPending(filter === "pending");
+
+    if (filter !== "pending") {
+      setPreference("threadFilter", filter);
+    }
+  };
+  const [diffViewMode, setDiffViewMode] = useDiffViewMode();
   const [selectedAuthorLogins, setSelectedAuthorLogins] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
@@ -317,7 +335,21 @@ export function PullRequestReview({
               />
             ) : null}
           </div>
-        ) : null}
+        ) : (
+          <div aria-label="Diff view" className={styles.segmentGroup} role="group">
+            {diffViewModes.map(({ label, mode }) => (
+              <button
+                aria-pressed={diffViewMode === mode}
+                className={styles.segment}
+                key={mode}
+                onClick={() => setDiffViewMode(mode)}
+                type="button"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {tab === "comments" && threadAuthors.length ? (
@@ -344,6 +376,7 @@ export function PullRequestReview({
           pendingViewedFilePaths={pendingViewedFilePaths}
           review={review}
           threadActions={threadActions}
+          viewMode={diffViewMode}
         />
       ) : (
         <CommentsReview
@@ -362,6 +395,11 @@ export function PullRequestReview({
     </section>
   );
 }
+
+const diffViewModes: Array<{ label: string; mode: DiffViewMode }> = [
+  { label: "Unified", mode: "unified" },
+  { label: "Split", mode: "split" },
+];
 
 const reviewDecisionBadges = {
   APPROVED: { label: "Approved", tone: "success" },
@@ -469,6 +507,7 @@ function FilesReview({
   pendingViewedFilePaths,
   review,
   threadActions,
+  viewMode,
 }: {
   onCreateThread: (input: CreatePullRequestReviewThreadInput) => Promise<unknown>;
   onLoadFileContent: LoadFileContent;
@@ -477,6 +516,7 @@ function FilesReview({
   pendingViewedFilePaths: readonly string[];
   review: PullRequestReviewModel;
   threadActions: ThreadActions;
+  viewMode: DiffViewMode;
 }) {
   if (!review.files.length) {
     return <div className={styles.empty}>No diff was returned for this pull request.</div>;
@@ -516,6 +556,7 @@ function FilesReview({
             rendersLazily={rendersLazily}
             threadActions={threadActions}
             threads={review.threads.filter((thread) => thread.path === file.path)}
+            viewMode={viewMode}
             viewedState={review.fileViewedStates[file.path] ?? "unviewed"}
           />
         ))}
@@ -716,6 +757,7 @@ function DiffFile({
   rendersLazily,
   threadActions,
   threads,
+  viewMode,
   viewedState,
 }: {
   file: PullRequestDiffFile;
@@ -731,6 +773,7 @@ function DiffFile({
   rendersLazily: boolean;
   threadActions: ThreadActions;
   threads: PullRequestReviewThread[];
+  viewMode: DiffViewMode;
   viewedState: FileViewedState;
 }) {
   const [activeCommentKey, setActiveCommentKey] = useState<string | null>(null);
@@ -745,6 +788,12 @@ function DiffFile({
   const gaps = useMemo(() => getDiffGaps(file.hunks), [file.hunks]);
   const isViewed = viewedState === "viewed";
   const isCollapsed = collapsedOverride ?? isViewed;
+  const syntax = useDiffSyntax(file, fileLines, isNearViewport && !isCollapsed);
+  const getTokens = (line: PullRequestDiffLine | null) => {
+    const key = line ? getLineSyntaxKey(line) : null;
+
+    return key ? syntax?.get(key) : undefined;
+  };
   const canExpandContext = fileRef !== null && fileLoadStatus !== "error";
   const threadsByLine = groupThreadsByLine(threads);
   const renderedThreadIds = new Set<string>();
@@ -803,6 +852,113 @@ function DiffFile({
     return () => observer.disconnect();
   }, [isNearViewport]);
 
+  const startComment = (target: CommentTarget | null) =>
+    target ? () => setActiveCommentKey(getNewThreadKey({ ...target, path: file.path })) : undefined;
+  // Unchanged lines revealed around the hunks can't be commented on, like on GitHub.
+  const renderContextLine = (line: PullRequestDiffLine) =>
+    viewMode === "split" ? (
+      <SplitDiffLine
+        key={line.id}
+        left={line}
+        leftTokens={getTokens(line)}
+        path={file.path}
+        right={line}
+        rightTokens={getTokens(line)}
+      />
+    ) : (
+      <DiffLine key={line.id} line={line} path={file.path} tokens={getTokens(line)} />
+    );
+  // What hangs under a diff row: the new comment form, then the threads on its lines.
+  const renderLineExtras = (lines: PullRequestDiffLine[], targets: Array<CommentTarget | null>) => {
+    const lineThreads = [
+      ...new Map(
+        lines
+          .flatMap((line) => getThreadsForDiffLine(threadsByLine, line))
+          .map((thread) => [thread.id, thread]),
+      ).values(),
+    ];
+    const activeTarget =
+      targets.find(
+        (target) =>
+          target !== null && getNewThreadKey({ ...target, path: file.path }) === activeCommentKey,
+      ) ?? null;
+
+    lineThreads.forEach((thread) => renderedThreadIds.add(thread.id));
+
+    return (
+      <>
+        {activeTarget ? (
+          <NewReviewThreadForm
+            hasPendingReview={threadActions.hasPendingReview}
+            isPending={
+              pendingCreateThread
+                ? getNewThreadKey(pendingCreateThread) === activeCommentKey
+                : false
+            }
+            location={formatLineLocation(file.path, activeTarget)}
+            onCancel={() => setActiveCommentKey(null)}
+            onSubmit={(body, publish) =>
+              onCreateThread({
+                body,
+                line: activeTarget.line,
+                path: file.path,
+                publish,
+                side: activeTarget.side,
+              }).then(() => setActiveCommentKey(null))
+            }
+          />
+        ) : null}
+        {lineThreads.map((thread) => (
+          <div className={styles.inlineThread} key={thread.id}>
+            <ReviewThreadCard actions={threadActions} thread={thread} />
+          </div>
+        ))}
+      </>
+    );
+  };
+  const renderHunkLines = (hunk: PullRequestDiffFile["hunks"][number]) => {
+    if (viewMode === "unified") {
+      return hunk.lines.map((line) => {
+        const target = getCommentTargetForLine(line);
+
+        return (
+          <div key={line.id}>
+            <DiffLine
+              line={line}
+              onStartComment={startComment(target)}
+              path={file.path}
+              tokens={getTokens(line)}
+            />
+            {renderLineExtras([line], [target])}
+          </div>
+        );
+      });
+    }
+
+    return buildSplitRows(hunk.lines).map((row) => {
+      const leftTarget = row.left ? getSideCommentTarget(row.left, "LEFT") : null;
+      const rightTarget = row.right ? getSideCommentTarget(row.right, "RIGHT") : null;
+      const lines = [row.left, row.right].filter(
+        (line, index, rowLines): line is PullRequestDiffLine =>
+          line !== null && rowLines.indexOf(line) === index,
+      );
+
+      return (
+        <div key={row.id}>
+          <SplitDiffLine
+            left={row.left}
+            leftTokens={getTokens(row.left)}
+            onStartLeftComment={startComment(leftTarget)}
+            onStartRightComment={startComment(rightTarget)}
+            path={file.path}
+            right={row.right}
+            rightTokens={getTokens(row.right)}
+          />
+          {renderLineExtras(lines, [leftTarget, rightTarget])}
+        </div>
+      );
+    });
+  };
   const renderGap = (gap: DiffGap) => {
     const hunk = file.hunks[gap.index] ?? null;
     const revealed = revealedGaps[gap.index] ?? emptyRevealedGap;
@@ -815,9 +971,7 @@ function DiffFile({
 
     return (
       <div className={styles.hunk} key={`gap:${gap.index}`}>
-        {lines.before.map((line) => (
-          <DiffLine key={line.id} line={line} path={file.path} />
-        ))}
+        {lines.before.map(renderContextLine)}
         {showExpander ? (
           <DiffExpander
             canExpandDown={gap.index > 0}
@@ -830,9 +984,7 @@ function DiffFile({
             }}
           />
         ) : null}
-        {lines.after.map((line) => (
-          <DiffLine key={line.id} line={line} path={file.path} />
-        ))}
+        {lines.after.map(renderContextLine)}
         {showHeader ? <div className={styles.hunkHeader}>{hunk.header}</div> : null}
       </div>
     );
@@ -840,57 +992,7 @@ function DiffFile({
   const renderedHunks = file.hunks.map((hunk, hunkIndex) => (
     <Fragment key={hunk.id}>
       {renderGap(gaps[hunkIndex] as DiffGap)}
-      <div className={styles.hunk}>
-        {hunk.lines.map((line) => {
-          const lineThreads = getThreadsForDiffLine(threadsByLine, line);
-          const commentTarget = getCommentTargetForLine(line);
-          const commentKey = commentTarget
-            ? getNewThreadKey({
-                line: commentTarget.line,
-                path: file.path,
-                side: commentTarget.side,
-              })
-            : null;
-          lineThreads.forEach((thread) => renderedThreadIds.add(thread.id));
-
-          return (
-            <div key={line.id}>
-              <DiffLine
-                line={line}
-                onStartComment={commentKey ? () => setActiveCommentKey(commentKey) : undefined}
-                path={file.path}
-              />
-              {commentTarget && activeCommentKey === commentKey ? (
-                <NewReviewThreadForm
-                  hasPendingReview={threadActions.hasPendingReview}
-                  isPending={
-                    pendingCreateThread
-                      ? getNewThreadKey(pendingCreateThread) === commentKey
-                      : false
-                  }
-                  line={commentTarget.line}
-                  onCancel={() => setActiveCommentKey(null)}
-                  onSubmit={(body, publish) =>
-                    onCreateThread({
-                      body,
-                      line: commentTarget.line,
-                      path: file.path,
-                      publish,
-                      side: commentTarget.side,
-                    }).then(() => setActiveCommentKey(null))
-                  }
-                  path={file.path}
-                />
-              ) : null}
-              {lineThreads.map((thread) => (
-                <div className={styles.inlineThread} key={thread.id}>
-                  <ReviewThreadCard actions={threadActions} thread={thread} />
-                </div>
-              ))}
-            </div>
-          );
-        })}
-      </div>
+      <div className={styles.hunk}>{renderHunkLines(hunk)}</div>
     </Fragment>
   ));
   const unmatchedThreads = threads.filter((thread) => !renderedThreadIds.has(thread.id));
@@ -1055,20 +1157,21 @@ function DiffLine({
   line,
   onStartComment,
   path,
+  tokens,
 }: {
   line: PullRequestDiffLine;
   onStartComment?: () => void;
   path: string;
+  tokens?: readonly SyntaxToken[];
 }) {
   const target = getCommentTargetForLine(line);
-  const lineLabel = target ? `${path}:${target.line}` : path;
 
   return (
     <div className={classNames(styles.diffLine, styles.diffLineTone[line.type])}>
       <span className={styles.lineCommentCell}>
         {target && onStartComment ? (
           <button
-            aria-label={`Add comment on ${lineLabel}`}
+            aria-label={`Add comment on ${formatLineLocation(path, target)}`}
             className={styles.lineCommentButton}
             onClick={onStartComment}
             type="button"
@@ -1081,7 +1184,88 @@ function DiffLine({
       <span className={styles.lineNumber}>{line.newLineNumber ?? ""}</span>
       <pre className={styles.codeLine}>
         {getDiffLinePrefix(line)}
-        {line.content || " "}
+        <HighlightedCode content={line.content} tokens={tokens} />
+      </pre>
+    </div>
+  );
+}
+
+function SplitDiffLine({
+  left,
+  leftTokens,
+  onStartLeftComment,
+  onStartRightComment,
+  path,
+  right,
+  rightTokens,
+}: {
+  left: PullRequestDiffLine | null;
+  leftTokens?: readonly SyntaxToken[];
+  onStartLeftComment?: () => void;
+  onStartRightComment?: () => void;
+  path: string;
+  right: PullRequestDiffLine | null;
+  rightTokens?: readonly SyntaxToken[];
+}) {
+  return (
+    <div className={styles.splitDiffLine}>
+      <SplitDiffCell
+        line={left}
+        onStartComment={onStartLeftComment}
+        path={path}
+        side="LEFT"
+        tokens={leftTokens}
+      />
+      <SplitDiffCell
+        line={right}
+        onStartComment={onStartRightComment}
+        path={path}
+        side="RIGHT"
+        tokens={rightTokens}
+      />
+    </div>
+  );
+}
+
+function SplitDiffCell({
+  line,
+  onStartComment,
+  path,
+  side,
+  tokens,
+}: {
+  line: PullRequestDiffLine | null;
+  onStartComment?: () => void;
+  path: string;
+  side: PullRequestDiffSide;
+  tokens?: readonly SyntaxToken[];
+}) {
+  if (!line) {
+    return <div className={classNames(styles.splitDiffCell, styles.splitDiffCellEmpty)} />;
+  }
+
+  const target = getSideCommentTarget(line, side);
+
+  return (
+    <div className={classNames(styles.splitDiffCell, styles.diffLineTone[line.type])}>
+      <span className={styles.lineCommentCell}>
+        {target && onStartComment ? (
+          <button
+            aria-label={`Add comment on ${formatLineLocation(path, target)}`}
+            className={styles.lineCommentButton}
+            onClick={onStartComment}
+            type="button"
+          >
+            +
+          </button>
+        ) : null}
+      </span>
+      <span className={styles.lineNumber}>
+        {(side === "LEFT" ? line.oldLineNumber : line.newLineNumber) ?? ""}
+      </span>
+      <pre className={classNames(styles.codeLine, styles.codeLineWrapped)}>
+        {getDiffLinePrefix(line)}
+        <HighlightedCode content={line.content} tokens={tokens} />
       </pre>
     </div>
   );
@@ -1090,17 +1274,15 @@ function DiffLine({
 function NewReviewThreadForm({
   hasPendingReview,
   isPending,
-  line,
+  location,
   onCancel,
   onSubmit,
-  path,
 }: {
   hasPendingReview: boolean;
   isPending: boolean;
-  line: number;
+  location: string;
   onCancel: () => void;
   onSubmit: (body: string, publish: boolean) => Promise<unknown>;
-  path: string;
 }) {
   const [draft, setDraft] = useState("");
   const [isPublishing, setIsPublishing] = useState(false);
@@ -1125,7 +1307,7 @@ function NewReviewThreadForm({
       }}
     >
       <textarea
-        aria-label={`New comment on ${path}:${line}`}
+        aria-label={`New comment on ${location}`}
         className={styles.textarea}
         onChange={(event) => setDraft(event.target.value)}
         placeholder="Leave a comment"
@@ -1707,22 +1889,23 @@ function getThreadsForDiffLine(
   return [...new Map(threads.map((thread) => [thread.id, thread])).values()];
 }
 
+// In the unified view, a line takes comments on its new version when it has one.
 function getCommentTargetForLine(line: PullRequestDiffLine) {
-  if (line.newLineNumber) {
-    return {
-      line: line.newLineNumber,
-      side: "RIGHT" as PullRequestDiffSide,
-    };
-  }
+  return getSideCommentTarget(line, "RIGHT") ?? getSideCommentTarget(line, "LEFT");
+}
 
-  if (line.oldLineNumber) {
-    return {
-      line: line.oldLineNumber,
-      side: "LEFT" as PullRequestDiffSide,
-    };
-  }
+function getSideCommentTarget(
+  line: PullRequestDiffLine,
+  side: PullRequestDiffSide,
+): CommentTarget | null {
+  const lineNumber = side === "LEFT" ? line.oldLineNumber : line.newLineNumber;
 
-  return null;
+  return lineNumber ? { line: lineNumber, side } : null;
+}
+
+// The old side's numbers can match the new side's, so they're told apart.
+function formatLineLocation(path: string, target: CommentTarget) {
+  return `${path}:${target.line}${target.side === "LEFT" ? " (old)" : ""}`;
 }
 
 function getFileName(path: string) {

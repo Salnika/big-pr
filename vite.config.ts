@@ -18,6 +18,10 @@ export default defineConfig({
   preview: {
     host: true,
   },
+  // The syntax highlighting worker loads each language's grammar on demand.
+  worker: {
+    format: "es",
+  },
   staged: {
     "*": "vp check --fix",
   },

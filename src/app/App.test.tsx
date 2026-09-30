@@ -59,6 +59,25 @@ describe("App navigation", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  test("goes back to the pull requests from the logo", async () => {
+    await seedCaches();
+    vi.stubGlobal("fetch", vi.fn());
+    window.history.replaceState(null, "", "/openai/pr-status/pull/18/files");
+
+    renderWithProviders(<App />);
+
+    expect(await screen.findByRole("heading", { name: "#18 Review a large PR" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Kosmodiff" })).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("link", { name: "Kosmodiff" }));
+
+    expect(window.location.pathname).toBe("/openai/pr-status/pulls");
+    expect(await screen.findByText("1 open pull requests")).toBeTruthy();
+    await waitFor(() => {
+      expect(document.title).toBe("Pull requests · openai/pr-status · Kosmodiff");
+    });
+  });
+
   test("opens a pasted GitHub-like PR link and remembers its repository", async () => {
     await seedCaches();
     vi.stubGlobal("fetch", vi.fn());

@@ -61,20 +61,47 @@ export const header = style({
   },
 });
 
-export const headerMeta = style({
-  display: "grid",
-  gap: vars.space[8],
+export const brand = style({
+  display: "flex",
+  alignItems: "center",
+  gap: vars.space[16],
+  minWidth: 0,
+});
+
+export const logoLink = style({
+  display: "flex",
+  borderRadius: "50%",
+  selectors: {
+    "&:focus-visible": {
+      outline: `2px solid ${vars.color.accent}`,
+      outlineOffset: "2px",
+    },
+  },
+});
+
+// The badge sits on an opaque square: cropping it to a circle hides the corners.
+export const logo = style({
+  flexShrink: 0,
+  width: "64px",
+  height: "64px",
+  borderRadius: "50%",
+});
+
+export const introLogo = style({
+  width: "96px",
+  height: "96px",
+  borderRadius: "50%",
 });
 
 export const appName = style({
+  display: "flex",
   margin: 0,
-  fontSize: vars.fontSize.xl,
-  lineHeight: 1.1,
 });
 
 export const repo = style({
-  color: vars.color.textMuted,
-  fontSize: vars.fontSize.sm,
+  color: vars.color.textStrong,
+  fontSize: vars.fontSize.md,
+  fontWeight: 600,
 });
 
 export const panel = style({

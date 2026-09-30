@@ -1,5 +1,6 @@
 import { useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
+import { appName } from "../../shared/lib/app-name";
 import { useDocumentTitle } from "../../shared/lib/navigation";
 import { Button, ButtonLink } from "../../shared/ui/Button";
 import { EmptyState } from "../../shared/ui/EmptyState";
@@ -224,7 +225,7 @@ export function PullRequestReviewContainer({
         : `PR #${pullRequestNumber}`,
       tab === "files" ? "Files" : "Comments",
       formatRepoLabel(repository),
-      "PR Status",
+      appName,
     ].join(" · "),
   );
 

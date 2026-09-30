@@ -8,6 +8,7 @@ import {
 } from "../features/settings/repo-parser";
 import { SettingsContainer } from "../features/settings/SettingsContainer";
 import { useSettingsStore } from "../features/settings/settings-store";
+import { appName } from "../shared/lib/app-name";
 import {
   navigate,
   useDocumentTitle,
@@ -18,6 +19,9 @@ import { Button } from "../shared/ui/Button";
 import { Link } from "../shared/ui/Link";
 import * as styles from "./App.css";
 import { getPullRequestPath, getPullRequestsPath, parseRoute } from "./routes";
+
+// Served as is from the public folder.
+const logoUrl = "/logo.png";
 
 export function App() {
   const path = useLocationPath();
@@ -62,10 +66,11 @@ export function App() {
     <main className={styles.shell}>
       <div className={styles.frame}>
         <header className={styles.header}>
-          <div className={styles.headerMeta}>
-            <span className={styles.eyebrow}>PR cockpit</span>
+          <div className={styles.brand}>
             <h1 className={styles.appName}>
-              <Link to={getPullRequestsPath(repository)}>PR Status</Link>
+              <Link className={styles.logoLink} to={getPullRequestsPath(repository)}>
+                <img alt={appName} className={styles.logo} height={64} src={logoUrl} width={64} />
+              </Link>
             </h1>
             <span className={styles.repo}>{formatRepoLabel(repository)}</span>
           </div>
@@ -106,12 +111,13 @@ export function App() {
 }
 
 function SetupScreen() {
-  useDocumentTitle("PR Status");
+  useDocumentTitle(appName);
 
   return (
     <main className={styles.shell}>
       <div className={styles.frame}>
         <section className={styles.intro}>
+          <img alt={appName} className={styles.introLogo} height={96} src={logoUrl} width={96} />
           <span className={styles.eyebrow}>PR cockpit</span>
           <h1 className={styles.hero}>Track pull request health at a glance.</h1>
           <p className={styles.copy}>

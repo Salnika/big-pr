@@ -1,3 +1,4 @@
+import { appName } from "../../shared/lib/app-name";
 import { useDocumentTitle } from "../../shared/lib/navigation";
 import { formatRefreshTime } from "../../shared/lib/date";
 import { Button } from "../../shared/ui/Button";
@@ -17,7 +18,7 @@ type PrGridContainerProps = {
 export function PrGridContainer({ getReviewHref, repository }: PrGridContainerProps) {
   const pullRequests = usePullRequestsQuery(repository);
 
-  useDocumentTitle(`Pull requests · ${formatRepoLabel(repository)} · PR Status`);
+  useDocumentTitle(`Pull requests · ${formatRepoLabel(repository)} · ${appName}`);
 
   if (pullRequests.isLoadingCache) {
     return null;

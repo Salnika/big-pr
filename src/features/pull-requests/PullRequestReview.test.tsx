@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { describe, expect, test, vi } from "vite-plus/test";
@@ -12,7 +12,11 @@ import type {
   PullRequestReviewModel,
   PullRequestReviewThread,
 } from "./pull-request-model";
+import { highlightInBackground } from "./syntax-highlighter";
 import type { LoadFileContent } from "./ThreadCodePreview";
+
+// Tests run without workers, so diffs stay plain unless a test hands out tokens.
+vi.mock("./syntax-highlighter", () => ({ highlightInBackground: vi.fn(async () => null) }));
 
 const headRefOid = "a".repeat(40);
 const originalCommitOid = "b".repeat(40);
@@ -461,6 +465,132 @@ describe("PullRequestReview", () => {
     expect(onLoadFileContent).toHaveBeenCalledOnce();
   });
 
+  test("colors the code of the diff once the highlighter answers", async () => {
+    vi.mocked(highlightInBackground).mockImplementationOnce(async (_path, texts) =>
+      texts.map((text) => text.split("\n").map((line) => [{ color: "#cf222e", content: line }])),
+    );
+
+    // A file of its own, as colors are kept per file once computed.
+    renderReview({ review: { ...review, files: [{ ...review.files[0] }] } });
+
+    const file = getFileArticle("src/review.ts");
+
+    await waitFor(() => {
+      expect(within(file).getByText("return true;").style.color).toBe("rgb(207, 34, 46)");
+    });
+    expect(highlightInBackground).toHaveBeenCalledWith("src/review.ts", [
+      "export function review() {\nreturn false;\n}",
+      "export function review() {\nreturn true;\n}",
+    ]);
+
+    await userEvent.click(screen.getByRole("button", { name: "Split" }));
+
+    expect(within(file).getByText("return false;").style.color).toBe("rgb(207, 34, 46)");
+    expect(
+      within(file)
+        .getAllByText("}")
+        .every((code) => code.style.color !== ""),
+    ).toBe(true);
+  });
+
+  test("shows the diff side by side and remembers the choice", async () => {
+    const onCreateThread = vi.fn().mockResolvedValue(undefined);
+    const { unmount } = renderReview({ onCreateThread });
+
+    expect(
+      within(getFileArticle("src/review.ts")).getByRole("button", {
+        name: "Add comment on src/review.ts:2 (old)",
+      }),
+    ).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Split" }));
+
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+
+    const file = getFileArticle("src/review.ts");
+    const deletedLine = within(file).getByText("-return false;");
+    const addedLine = within(file).getByText("+return true;");
+
+    expect(getSplitRow(deletedLine)).toBe(getSplitRow(addedLine));
+    expect([getSplitLineNumber(deletedLine), getSplitLineNumber(addedLine)]).toEqual(["2", "2"]);
+    expect(within(file).getAllByText("export function review() {")).toHaveLength(2);
+    expect(within(file).getAllByText("This branch needs a guard.")).toHaveLength(1);
+    expect(within(file).getAllByText("Looks good now.")).toHaveLength(1);
+    expect(
+      within(file).getByRole("button", { name: "Add comment on src/review.ts:2 (old)" }),
+    ).toBeTruthy();
+    expect(
+      within(file).getByRole("button", { name: "Add comment on src/review.ts:2" }),
+    ).toBeTruthy();
+
+    await userEvent.click(
+      within(file).getByRole("button", { name: "Add comment on src/review.ts:1 (old)" }),
+    );
+    await userEvent.type(
+      within(file).getByLabelText("New comment on src/review.ts:1 (old)"),
+      "Why was this exported?",
+    );
+    await userEvent.click(within(file).getByRole("button", { name: "Add single comment" }));
+
+    expect(onCreateThread).toHaveBeenCalledWith({
+      body: "Why was this exported?",
+      line: 1,
+      path: "src/review.ts",
+      publish: true,
+      pullRequestId: "pr-1",
+      side: "LEFT",
+    });
+
+    unmount();
+    renderReview();
+
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  test("expands unchanged lines on both sides of the split view", async () => {
+    const onLoadFileContent = vi
+      .fn<LoadFileContent>()
+      .mockResolvedValue(
+        `${Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n")}\n`,
+      );
+
+    renderReview({
+      onLoadFileContent,
+      review: { ...review, files: [expandableFile], threads: [] },
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Split" }));
+
+    const file = getFileArticle("src/app.ts");
+
+    expect(getSplitRow(within(file).getByText("+line 6"))?.firstElementChild?.textContent).toBe("");
+
+    await userEvent.click(within(file).getByRole("button", { name: "Expand 2 lines up" }));
+
+    expect((await within(file).findAllByText("line 1")).map(getSplitLineNumber)).toEqual([
+      "1",
+      "1",
+    ]);
+
+    await userEvent.click(within(file).getByRole("button", { name: "Expand all 5 lines" }));
+
+    expect(within(file).getAllByText("line 8").map(getSplitLineNumber)).toEqual(["7", "8"]);
+  });
+
+  test("opens GitHub links asking for a split diff, and keeps their parameter in step", async () => {
+    window.history.replaceState(null, "", "/openai/pr-status/pull/18/files?diff=split");
+
+    renderReview();
+
+    expect(screen.getByRole("button", { name: "Split" }).getAttribute("aria-pressed")).toBe("true");
+
+    await userEvent.click(screen.getByRole("button", { name: "Unified" }));
+
+    expect(window.location.search).toBe("?diff=unified");
+    expect(
+      within(getFileArticle("src/review.ts")).getAllByText("export function review() {"),
+    ).toHaveLength(1);
+  });
+
   test("keeps plain hunk headers when the file cannot be loaded", async () => {
     renderReview({
       onLoadFileContent: vi.fn<LoadFileContent>().mockRejectedValue(new Error("offline")),
@@ -533,6 +663,24 @@ describe("PullRequestReview", () => {
       true,
     );
     expect(screen.getByText("You can't approve your own pull request.")).toBeTruthy();
+  });
+
+  test("keeps the comment filter for the next PR, except the pending one", async () => {
+    const { unmount } = renderReview({ review: createReviewWithPendingComments() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Comments" }));
+    await userEvent.click(screen.getByRole("button", { name: "Open" }));
+    await userEvent.click(screen.getByRole("button", { name: "Pending" }));
+
+    unmount();
+    renderReview({ review: createReviewWithPendingComments() });
+    await userEvent.click(screen.getByRole("button", { name: "Comments" }));
+
+    expect(screen.getByRole("button", { name: "Open" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Pending" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(screen.getByText("Showing 2 of 2 threads")).toBeTruthy();
   });
 
   test("marks pending comments and filters the threads that hold them", async () => {
@@ -903,6 +1051,14 @@ function getThreadCard(location: string) {
   return screen
     .getByLabelText(`Reply to review thread at ${location}`)
     .closest("article") as HTMLElement;
+}
+
+function getSplitRow(code: HTMLElement) {
+  return code.closest("pre")?.parentElement?.parentElement ?? null;
+}
+
+function getSplitLineNumber(code: HTMLElement) {
+  return code.closest("pre")?.previousElementSibling?.textContent ?? null;
 }
 
 function getLineNumbers(code: HTMLElement) {
