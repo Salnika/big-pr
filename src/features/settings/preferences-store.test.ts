@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
   defaultPreferences,
+  maxChangesPeriodAmount,
+  parseChangesPeriodAmount,
   PREFERENCES_STORAGE_KEY,
   usePreferencesStore,
 } from "./preferences-store";
@@ -58,6 +60,33 @@ describe("preferences store", () => {
     expect(window.localStorage.getItem(PREFERENCES_STORAGE_KEY)).toContain(
       '"diffViewMode":"split"',
     );
+  });
+
+  test("keeps a period of whole days or weeks", () => {
+    window.localStorage.setItem(
+      PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ changesPeriod: { amount: 3, unit: "days" } }),
+    );
+    notifyStorageChange(PREFERENCES_STORAGE_KEY);
+
+    expect(usePreferencesStore.getState().preferences.changesPeriod).toEqual({
+      amount: 3,
+      unit: "days",
+    });
+
+    window.localStorage.setItem(
+      PREFERENCES_STORAGE_KEY,
+      JSON.stringify({ changesPeriod: { amount: 1.5, unit: "months" } }),
+    );
+    notifyStorageChange(PREFERENCES_STORAGE_KEY);
+
+    expect(usePreferencesStore.getState().preferences.changesPeriod).toEqual(
+      defaultPreferences.changesPeriod,
+    );
+    expect(parseChangesPeriodAmount("12")).toBe(12);
+    expect(parseChangesPeriodAmount("")).toBeNull();
+    expect(parseChangesPeriodAmount(0)).toBeNull();
+    expect(parseChangesPeriodAmount(maxChangesPeriodAmount + 1)).toBeNull();
   });
 
   test("leaves storage alone when a preference doesn't change", () => {

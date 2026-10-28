@@ -12,6 +12,13 @@ import {
   splitFileLines,
   type ThreadCodeSource,
 } from "./code-context";
+import {
+  type ChangesPeriod,
+  getChangesPeriodStart,
+  type LoadCommitRangeDiff,
+  usePeriodChanges,
+} from "./changes-period";
+import { ChangesPeriodFilter, ChangesPeriodSummary } from "./ChangesPeriodFilter";
 import { AddReactionButton, CommentReactionList } from "./CommentReactions";
 import {
   type DiffGap,
@@ -82,6 +89,7 @@ type FileTreeNode = {
 };
 const commentsPageSize = 20;
 const diffExpandLineCount = 20;
+const noLineNumbers: ReadonlySet<number> = new Set();
 // Past this many files, diffs render as they approach the viewport to keep the page responsive.
 const lazyDiffFileCount = 50;
 const markdownPlugins = [remarkGfm];
@@ -102,6 +110,7 @@ type PullRequestReviewProps = {
   onCreateThread: (input: CreatePullRequestReviewThreadInput) => Promise<unknown>;
   onDeletePendingComment: (commentId: string) => Promise<unknown>;
   onDiscardReview: () => Promise<unknown>;
+  onLoadCommitRangeDiff: LoadCommitRangeDiff;
   onLoadFileContent: LoadFileContent;
   onRefresh: () => void;
   onReply: (threadId: string, body: string, addToReview: boolean) => Promise<unknown>;
@@ -130,6 +139,7 @@ export function PullRequestReview({
   onCreateThread,
   onDeletePendingComment,
   onDiscardReview,
+  onLoadCommitRangeDiff,
   onLoadFileContent,
   onRefresh,
   onReply,
@@ -149,7 +159,27 @@ export function PullRequestReview({
 }: PullRequestReviewProps) {
   const [pendingFileScrollId, setPendingFileScrollId] = useState<string | null>(null);
   const savedThreadFilter = usePreferencesStore((store) => store.preferences.threadFilter);
+  const savedChangesPeriod = usePreferencesStore((store) => store.preferences.changesPeriod);
   const setPreference = usePreferencesStore((store) => store.setPreference);
+  // A review opens on every change; a period counts back from the moment it is picked.
+  const [activePeriod, setActivePeriod] = useState<{ period: ChangesPeriod; since: number } | null>(
+    null,
+  );
+  const periodChanges = usePeriodChanges(
+    review,
+    activePeriod?.since ?? null,
+    onLoadCommitRangeDiff,
+  );
+  const applyChangesPeriod = (period: ChangesPeriod) => {
+    setPreference("changesPeriod", period);
+    setActivePeriod({ period, since: getChangesPeriodStart(period, Date.now()) });
+  };
+  // While a period's commits or diff are missing, its summary says why instead of the files.
+  const filesView = !periodChanges
+    ? { files: review.files, rangeBaseOid: null }
+    : periodChanges.status === "ready" && periodChanges.files.length
+      ? { files: periodChanges.files, rangeBaseOid: periodChanges.baseOid }
+      : null;
   const [isShowingPending, setIsShowingPending] = useState(false);
   const threadFilter: ThreadFilter = isShowingPending ? "pending" : savedThreadFilter;
   const setThreadFilter = (filter: ThreadFilter) => {
@@ -336,18 +366,26 @@ export function PullRequestReview({
             ) : null}
           </div>
         ) : (
-          <div aria-label="Diff view" className={styles.segmentGroup} role="group">
-            {diffViewModes.map(({ label, mode }) => (
-              <button
-                aria-pressed={diffViewMode === mode}
-                className={styles.segment}
-                key={mode}
-                onClick={() => setDiffViewMode(mode)}
-                type="button"
-              >
-                {label}
-              </button>
-            ))}
+          <div className={styles.toolbar}>
+            <ChangesPeriodFilter
+              isActive={activePeriod !== null}
+              onApply={applyChangesPeriod}
+              onShowAll={() => setActivePeriod(null)}
+              period={activePeriod?.period ?? savedChangesPeriod}
+            />
+            <div aria-label="Diff view" className={styles.segmentGroup} role="group">
+              {diffViewModes.map(({ label, mode }) => (
+                <button
+                  aria-pressed={diffViewMode === mode}
+                  className={styles.segment}
+                  key={mode}
+                  onClick={() => setDiffViewMode(mode)}
+                  type="button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -361,6 +399,16 @@ export function PullRequestReview({
         />
       ) : null}
 
+      {tab === "files" && activePeriod && periodChanges ? (
+        <ChangesPeriodSummary
+          baseBranch={review.pullRequest.baseBranch}
+          changes={periodChanges}
+          commitCount={review.commits.length}
+          period={activePeriod.period}
+          since={activePeriod.since}
+        />
+      ) : null}
+
       {mutationError ? (
         <div className={styles.inlineError} role="alert">
           {mutationError.message}
@@ -368,16 +416,22 @@ export function PullRequestReview({
       ) : null}
 
       {tab === "files" ? (
-        <FilesReview
-          onCreateThread={onCreateThread}
-          onLoadFileContent={onLoadFileContent}
-          onSetFileViewed={onSetFileViewed}
-          pendingCreateThread={pendingCreateThread}
-          pendingViewedFilePaths={pendingViewedFilePaths}
-          review={review}
-          threadActions={threadActions}
-          viewMode={diffViewMode}
-        />
+        filesView ? (
+          <FilesReview
+            files={filesView.files}
+            isCommitRange={filesView.rangeBaseOid !== null}
+            // Revealed lines and folds belong to the hunks of one diff.
+            key={filesView.rangeBaseOid ?? "pull-request"}
+            onCreateThread={onCreateThread}
+            onLoadFileContent={onLoadFileContent}
+            onSetFileViewed={onSetFileViewed}
+            pendingCreateThread={pendingCreateThread}
+            pendingViewedFilePaths={pendingViewedFilePaths}
+            review={review}
+            threadActions={threadActions}
+            viewMode={diffViewMode}
+          />
+        ) : null
       ) : (
         <CommentsReview
           files={review.files}
@@ -385,6 +439,8 @@ export function PullRequestReview({
           headRefOid={review.headRefOid}
           onLoadFileContent={onLoadFileContent}
           onOpenFile={(fileId) => {
+            // File ids follow the PR's whole diff, which a period can leave files out of.
+            setActivePeriod(null);
             onTabChange("files");
             setPendingFileScrollId(fileId);
           }}
@@ -500,6 +556,8 @@ function AuthorFilter({
 }
 
 function FilesReview({
+  files,
+  isCommitRange,
   onCreateThread,
   onLoadFileContent,
   onSetFileViewed,
@@ -509,6 +567,9 @@ function FilesReview({
   threadActions,
   viewMode,
 }: {
+  files: PullRequestDiffFile[];
+  /** The files compare a later commit than the PR's base with its head. */
+  isCommitRange: boolean;
   onCreateThread: (input: CreatePullRequestReviewThreadInput) => Promise<unknown>;
   onLoadFileContent: LoadFileContent;
   onSetFileViewed: (path: string, viewed: boolean) => void;
@@ -518,48 +579,71 @@ function FilesReview({
   threadActions: ThreadActions;
   viewMode: DiffViewMode;
 }) {
-  if (!review.files.length) {
+  // Comments land on the PR's own diff. A range of commits numbers its old side from its first
+  // commit rather than the PR's base, so only new-side lines that the PR's diff shows take them.
+  const commentableLinesByPath = useMemo(
+    () =>
+      isCommitRange
+        ? new Map(review.files.map((file) => [file.path, getNewLineNumbers(file)]))
+        : null,
+    [isCommitRange, review.files],
+  );
+
+  if (!files.length) {
     return <div className={styles.empty}>No diff was returned for this pull request.</div>;
   }
 
-  const rendersLazily = review.files.length > lazyDiffFileCount;
+  const rendersLazily = files.length > lazyDiffFileCount;
 
   return (
     <div className={styles.reviewLayout}>
-      <FileTreeNav fileViewedStates={review.fileViewedStates} files={review.files} />
+      <FileTreeNav fileViewedStates={review.fileViewedStates} files={files} />
 
       <div className={styles.files}>
-        {review.changedFiles > review.files.length ? (
+        {!isCommitRange && review.changedFiles > files.length ? (
           <div className={styles.filesNotice} role="note">
-            Showing the first {review.files.length} of {review.changedFiles} changed files: GitHub
-            lists at most 3,000 files per pull request.
+            Showing the first {files.length} of {review.changedFiles} changed files: GitHub lists at
+            most 3,000 files per pull request.
           </div>
         ) : null}
-        {review.files.map((file, index) => (
-          <DiffFile
-            file={file}
-            fileId={getFileDomId(file, index)}
-            fileRef={
-              file.status === "added" || file.status === "deleted" ? null : review.headRefOid
-            }
-            isViewedPending={pendingViewedFilePaths.includes(file.path)}
-            key={`${file.path}:${index}`}
-            onCreateThread={(input) =>
-              onCreateThread({
-                ...input,
-                pullRequestId: review.pullRequest.id,
-              })
-            }
-            onLoadFileContent={onLoadFileContent}
-            onSetViewed={(viewed) => onSetFileViewed(file.path, viewed)}
-            pendingCreateThread={pendingCreateThread}
-            rendersLazily={rendersLazily}
-            threadActions={threadActions}
-            threads={review.threads.filter((thread) => thread.path === file.path)}
-            viewMode={viewMode}
-            viewedState={review.fileViewedStates[file.path] ?? "unviewed"}
-          />
-        ))}
+        {files.map((file, index) => {
+          const fileThreads = review.threads.filter((thread) => thread.path === file.path);
+
+          return (
+            <DiffFile
+              commentableLines={
+                commentableLinesByPath
+                  ? (commentableLinesByPath.get(file.path) ?? noLineNumbers)
+                  : undefined
+              }
+              file={file}
+              fileId={getFileDomId(file, index)}
+              fileRef={
+                file.status === "added" || file.status === "deleted" ? null : review.headRefOid
+              }
+              isViewedPending={pendingViewedFilePaths.includes(file.path)}
+              key={`${file.path}:${index}`}
+              onCreateThread={(input) =>
+                onCreateThread({
+                  ...input,
+                  pullRequestId: review.pullRequest.id,
+                })
+              }
+              onLoadFileContent={onLoadFileContent}
+              onSetViewed={(viewed) => onSetFileViewed(file.path, viewed)}
+              pendingCreateThread={pendingCreateThread}
+              rendersLazily={rendersLazily}
+              threadActions={threadActions}
+              threads={
+                isCommitRange
+                  ? filterThreadsOnNewLines(fileThreads, getNewLineNumbers(file))
+                  : fileThreads
+              }
+              viewMode={viewMode}
+              viewedState={review.fileViewedStates[file.path] ?? "unviewed"}
+            />
+          );
+        })}
       </div>
     </div>
   );
@@ -746,6 +830,7 @@ function FileTreeNodeView({
 }
 
 function DiffFile({
+  commentableLines,
   file,
   fileId,
   fileRef,
@@ -760,6 +845,8 @@ function DiffFile({
   viewMode,
   viewedState,
 }: {
+  /** New-side lines that take comments; every line does without it. */
+  commentableLines?: ReadonlySet<number>;
   file: PullRequestDiffFile;
   fileId: string;
   fileRef: string | null;
@@ -854,6 +941,10 @@ function DiffFile({
 
   const startComment = (target: CommentTarget | null) =>
     target ? () => setActiveCommentKey(getNewThreadKey({ ...target, path: file.path })) : undefined;
+  const allowComment = (target: CommentTarget | null) =>
+    target && (!commentableLines || (target.side === "RIGHT" && commentableLines.has(target.line)))
+      ? target
+      : null;
   // Unchanged lines revealed around the hunks can't be commented on, like on GitHub.
   const renderContextLine = (line: PullRequestDiffLine) =>
     viewMode === "split" ? (
@@ -919,7 +1010,7 @@ function DiffFile({
   const renderHunkLines = (hunk: PullRequestDiffFile["hunks"][number]) => {
     if (viewMode === "unified") {
       return hunk.lines.map((line) => {
-        const target = getCommentTargetForLine(line);
+        const target = allowComment(getCommentTargetForLine(line));
 
         return (
           <div key={line.id}>
@@ -936,8 +1027,8 @@ function DiffFile({
     }
 
     return buildSplitRows(hunk.lines).map((row) => {
-      const leftTarget = row.left ? getSideCommentTarget(row.left, "LEFT") : null;
-      const rightTarget = row.right ? getSideCommentTarget(row.right, "RIGHT") : null;
+      const leftTarget = row.left ? allowComment(getSideCommentTarget(row.left, "LEFT")) : null;
+      const rightTarget = row.right ? allowComment(getSideCommentTarget(row.right, "RIGHT")) : null;
       const lines = [row.left, row.right].filter(
         (line, index, rowLines): line is PullRequestDiffLine =>
           line !== null && rowLines.indexOf(line) === index,
@@ -1020,7 +1111,7 @@ function DiffFile({
             )}
           />
         </button>
-        <code className={styles.filePath}>{file.path}</code>
+        <code className={styles.filePath} onClick={() => navigator.clipboard.writeText(file.path)}>{file.path}</code>
         <span className={styles.fileHeaderMeta}>
           {viewedState === "dismissed" ? (
             <span className={styles.fileChangedBadge}>Changed since last view</span>
@@ -1102,16 +1193,16 @@ function DiffExpander({
   const lineLabel = `${lineCount} ${lineCount === 1 ? "line" : "lines"}`;
   const directions: Array<{ direction: ExpandDirection; label: string }> =
     canExpandDown &&
-    canExpandUp &&
-    hiddenLineCount !== null &&
-    hiddenLineCount <= diffExpandLineCount
+      canExpandUp &&
+      hiddenLineCount !== null &&
+      hiddenLineCount <= diffExpandLineCount
       ? [{ direction: "all", label: `Expand all ${lineLabel}` }]
       : [
-          ...(canExpandDown
-            ? [{ direction: "down" as const, label: `Expand ${lineLabel} down` }]
-            : []),
-          ...(canExpandUp ? [{ direction: "up" as const, label: `Expand ${lineLabel} up` }] : []),
-        ];
+        ...(canExpandDown
+          ? [{ direction: "down" as const, label: `Expand ${lineLabel} down` }]
+          : []),
+        ...(canExpandUp ? [{ direction: "up" as const, label: `Expand ${lineLabel} up` }] : []),
+      ];
 
   return (
     <div className={styles.diffExpander}>
@@ -1295,7 +1386,7 @@ function NewReviewThreadForm({
     }
 
     setIsPublishing(publish);
-    void onSubmit(body, publish).catch(() => {});
+    void onSubmit(body, publish).catch(() => { });
   };
 
   return (
@@ -1477,7 +1568,7 @@ function ReviewThreadCard({
     void actions
       .onReply(thread.id, body, addToReview)
       .then(() => setDraft(""))
-      .catch(() => {});
+      .catch(() => { });
   };
 
   return (
@@ -1549,7 +1640,7 @@ function ReviewThreadCard({
             <Button
               disabled={isResolving}
               onClick={() => {
-                void actions.onSetResolved(thread.id, !thread.isResolved).catch(() => {});
+                void actions.onSetResolved(thread.id, !thread.isResolved).catch(() => { });
               }}
               size="sm"
               type="button"
@@ -1632,7 +1723,7 @@ function ReviewThreadCard({
                             void actions
                               .onDeletePendingComment(comment.id)
                               .then(() => setConfirmingDeleteCommentId(null))
-                              .catch(() => {});
+                              .catch(() => { });
                           }}
                           type="button"
                         >
@@ -1887,6 +1978,28 @@ function getThreadsForDiffLine(
   ];
 
   return [...new Map(threads.map((thread) => [thread.id, thread])).values()];
+}
+
+function getNewLineNumbers(file: PullRequestDiffFile) {
+  return new Set(
+    file.hunks.flatMap((hunk) =>
+      hunk.lines.flatMap((line) => (line.newLineNumber === null ? [] : [line.newLineNumber])),
+    ),
+  );
+}
+
+// Threads still placed on the PR's latest code, on a line these changes show.
+function filterThreadsOnNewLines(
+  threads: PullRequestReviewThread[],
+  lineNumbers: ReadonlySet<number>,
+) {
+  return threads.filter(
+    (thread) =>
+      thread.line !== null &&
+      thread.diffSide !== "LEFT" &&
+      thread.startDiffSide !== "LEFT" &&
+      lineNumbers.has(thread.line),
+  );
 }
 
 // In the unified view, a line takes comments on its new version when it has one.

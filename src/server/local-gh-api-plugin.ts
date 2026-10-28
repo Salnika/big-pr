@@ -3,6 +3,7 @@ import {
   createReviewThread,
   deletePendingComment,
   discardPendingReview,
+  getCommitRangeDiff,
   getGithubCliStatus,
   getPullRequestReview,
   getPullRequestsOverview,
@@ -492,6 +493,47 @@ export function localGhApiPlugin() {
           owner: body.owner,
           path: body.path,
           ref: body.ref,
+          repo: body.repo,
+        });
+
+        respondJson(res, 200, result);
+      } catch (error) {
+        if (error instanceof LocalGithubError) {
+          respondJson(res, error.status ?? 500, {
+            message: error.message,
+            status: error.status,
+            type: error.type,
+          });
+          return;
+        }
+
+        next(error);
+      }
+      return;
+    }
+
+    if (req.url === "/api/local/github/commit-range-diff" && req.method === "POST") {
+      try {
+        const body = (await readJsonBody(req)) as {
+          base?: string;
+          head?: string;
+          owner?: string;
+          repo?: string;
+        };
+
+        if (!body.owner || !body.repo || !body.base || !body.head) {
+          respondJson(res, 400, {
+            message: "Owner, repo, and the two commits to compare are required.",
+            status: 400,
+            type: "unknown",
+          });
+          return;
+        }
+
+        const result = await getCommitRangeDiff({
+          base: body.base,
+          head: body.head,
+          owner: body.owner,
           repo: body.repo,
         });
 

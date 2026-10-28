@@ -115,6 +115,12 @@ export interface PullRequestReviewThread {
   startLine: number | null;
 }
 
+export interface PullRequestCommit {
+  committedDate: string;
+  messageHeadline: string;
+  oid: string;
+}
+
 export type FileViewedState = "dismissed" | "unviewed" | "viewed";
 export type PullRequestReviewDecision = "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED";
 export type PullRequestReviewState =
@@ -128,6 +134,8 @@ export interface PullRequestReviewModel {
   additions: number;
   changedFiles: number;
   commentsCount: number;
+  /** Oldest first. Reviews saved before commits were loaded have none: a PR always has one. */
+  commits: PullRequestCommit[];
   deletions: number;
   /** The viewer's "Viewed" checkboxes on GitHub, by file path. */
   fileViewedStates: Record<string, FileViewedState>;
@@ -215,4 +223,10 @@ export interface SetCommentReactionResult {
 
 export interface RepositoryFileContent {
   content: string;
+}
+
+export interface CommitRangeDiff {
+  files: PullRequestDiffFile[];
+  /** A range too large for one diff only lists its first 300 files. */
+  isTruncated: boolean;
 }

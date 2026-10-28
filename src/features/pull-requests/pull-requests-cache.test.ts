@@ -31,6 +31,7 @@ describe("pull requests cache", () => {
 
   test("moves reviews saved in localStorage by earlier versions and fills new fields", async () => {
     const {
+      commits: _commits,
       fileViewedStates: _fileViewedStates,
       headRefOid: _headRefOid,
       pendingReviewId: _pendingReviewId,
@@ -65,6 +66,7 @@ describe("pull requests cache", () => {
 
     expect(cached?.fetchedAt).toBe(42);
     expect(cached?.data.headRefOid).toBeNull();
+    expect(cached?.data.commits).toEqual([]);
     expect(cached?.data.fileViewedStates).toEqual({});
     expect(cached?.data).toMatchObject({
       pendingReviewId: null,
@@ -120,6 +122,13 @@ const review: PullRequestReviewModel = {
   additions: 1,
   changedFiles: 1,
   commentsCount: 1,
+  commits: [
+    {
+      committedDate: "2026-04-21T08:00:00.000Z",
+      messageHeadline: "Review a large PR",
+      oid: "a".repeat(40),
+    },
+  ],
   deletions: 0,
   fileViewedStates: {},
   files: [],

@@ -3,6 +3,7 @@ import {
   createReviewThread,
   deletePendingComment,
   discardPendingReview,
+  getCommitRangeDiff,
   getGithubCliStatus,
   getPullRequestReview,
   getPullRequestsOverview,
@@ -788,6 +789,169 @@ describe("local gh api", () => {
     ]);
   });
 
+  test("loads every commit of a long pull request, oldest first", async () => {
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args.includes("Accept: application/vnd.github.v3.diff")) {
+        return { stderr: "", stdout: "" };
+      }
+
+      const commits = args.at(-1)?.includes("PullRequestCommitsPage")
+        ? {
+            nodes: [createRawCommit(1), createRawCommit(2)],
+            pageInfo: { hasPreviousPage: false, startCursor: "cursor-1" },
+          }
+        : {
+            nodes: [createRawCommit(3), createRawCommit(4)],
+            pageInfo: { hasPreviousPage: true, startCursor: "cursor-3" },
+          };
+
+      return {
+        stderr: "",
+        stdout: JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: args.at(-1)?.includes("PullRequestCommitsPage")
+                ? { commits }
+                : {
+                    additions: 4,
+                    author: { login: "alexis" },
+                    baseRefName: "main",
+                    changedFiles: 1,
+                    commits,
+                    deletions: 0,
+                    headRefName: "long-run",
+                    id: "pr_42",
+                    isDraft: false,
+                    mergeStateStatus: "CLEAN",
+                    mergeable: "MERGEABLE",
+                    number: 42,
+                    repository: { nameWithOwner: "openai/pr-status" },
+                    reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } },
+                    statusCheckRollup: { state: "SUCCESS" },
+                    title: "Keep a long branch going",
+                    updatedAt: "2026-10-04T09:00:00.000Z",
+                    url: "https://github.com/openai/pr-status/pull/42",
+                  },
+            },
+          },
+        }),
+      };
+    });
+
+    const review = await getPullRequestReview(
+      { number: 42, owner: "openai", repo: "pr-status" },
+      runGh,
+    );
+    const commitPageQueries = runGh.mock.calls
+      .map(([args]) => args.at(-1) ?? "")
+      .filter((query) => query.includes("PullRequestCommitsPage"));
+
+    expect(review.commits.map((commit) => commit.messageHeadline)).toEqual([
+      "Commit 1",
+      "Commit 2",
+      "Commit 3",
+      "Commit 4",
+    ]);
+    expect(review.commits[0]).toEqual({
+      committedDate: "2026-10-01T09:00:00.000Z",
+      messageHeadline: "Commit 1",
+      oid: "1".repeat(40),
+    });
+    expect(runGh.mock.calls[0]?.[0]?.at(-1)).toContain("commits(last: 100)");
+    expect(commitPageQueries).toHaveLength(1);
+    expect(commitPageQueries[0]).toContain('before: "cursor-3"');
+  });
+
+  test("compares two commits of a pull request", async () => {
+    const base = "b".repeat(40);
+    const head = "a".repeat(40);
+    const runGh = vi.fn(async (_args: string[]) => ({
+      stderr: "",
+      stdout: `diff --git a/src/app.ts b/src/app.ts
+--- a/src/app.ts
++++ b/src/app.ts
+@@ -1 +1 @@
+-const ready = false;
++const ready = true;
+`,
+    }));
+
+    const result = await getCommitRangeDiff(
+      { base, head, owner: "openai", repo: "pr-status" },
+      runGh,
+    );
+
+    expect(result.isTruncated).toBe(false);
+    expect(result.files.map((file) => [file.path, file.additions, file.deletions])).toEqual([
+      ["src/app.ts", 1, 1],
+    ]);
+    expect(runGh).toHaveBeenCalledWith([
+      "api",
+      `repos/openai/pr-status/compare/${base}...${head}`,
+      "-H",
+      "Accept: application/vnd.github.v3.diff",
+    ]);
+  });
+
+  test("lists the first files of a range of commits too large for one diff", async () => {
+    const base = "b".repeat(40);
+    const head = "a".repeat(40);
+    const files = Array.from({ length: 300 }, (_, index) => ({
+      additions: 1,
+      deletions: 0,
+      filename: `src/file-${index + 1}.ts`,
+      patch: "@@ -0,0 +1 @@\n+export {};",
+      status: "added",
+    }));
+    const runGh = vi.fn(async (args: string[]) => {
+      if (args.includes("Accept: application/vnd.github.v3.diff")) {
+        throw Object.assign(new Error("Command failed"), {
+          stderr: "gh: Sorry, the diff exceeded the maximum number of files (300). (HTTP 406)",
+        });
+      }
+
+      return { stderr: "", stdout: JSON.stringify({ files }) };
+    });
+
+    const result = await getCommitRangeDiff(
+      { base, head, owner: "openai", repo: "pr-status" },
+      runGh,
+    );
+
+    expect(result.isTruncated).toBe(true);
+    expect(result.files).toHaveLength(300);
+    expect(result.files[0]).toMatchObject({ path: "src/file-1.ts", status: "added" });
+    expect(runGh.mock.calls[1]?.[0]).toEqual([
+      "api",
+      `repos/openai/pr-status/compare/${base}...${head}?per_page=1`,
+    ]);
+  });
+
+  test("compares only commits, and explains commits GitHub no longer has", async () => {
+    const runGh = vi.fn(async (_args: string[]) => {
+      throw Object.assign(new Error("Command failed"), { stderr: "gh: Not Found (HTTP 404)" });
+    });
+
+    await expect(
+      getCommitRangeDiff(
+        { base: "main", head: "a".repeat(40), owner: "openai", repo: "pr-status" },
+        runGh,
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(runGh).not.toHaveBeenCalled();
+
+    await expect(
+      getCommitRangeDiff(
+        { base: "b".repeat(40), head: "a".repeat(40), owner: "openai", repo: "pr-status" },
+        runGh,
+      ),
+    ).rejects.toMatchObject({
+      message:
+        "Commits bbbbbbb and aaaaaaa could not be compared. Refresh the PR to load its latest commits.",
+      status: 404,
+    });
+  });
+
   test("submits a new review or the pending one with its comments", async () => {
     const createRunner = (pendingReviewId: string | null, state: string) => {
       const submission = {
@@ -1184,6 +1348,16 @@ function getQueryKind(query: string) {
   }
 
   return query.includes('after: "cursor-1"') ? "page:cursor-1" : "page:first";
+}
+
+function createRawCommit(number: number) {
+  return {
+    commit: {
+      committedDate: `2026-10-0${number}T09:00:00.000Z`,
+      messageHeadline: `Commit ${number}`,
+      oid: String(number).repeat(40),
+    },
+  };
 }
 
 function createRawComment(id: string, body: string) {

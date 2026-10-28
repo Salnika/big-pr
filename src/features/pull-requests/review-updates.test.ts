@@ -246,6 +246,7 @@ const review: PullRequestReviewModel = {
   additions: 1,
   changedFiles: 1,
   commentsCount: 1,
+  commits: [],
   deletions: 0,
   fileViewedStates: {},
   files: [],

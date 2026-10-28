@@ -16,6 +16,7 @@ import {
   mapReviewState,
   mapReviewThread,
   type RawPullRequestBase,
+  type RawPullRequestCommits,
   type RawPullRequestFiles,
   type RawPullRequestReview,
   type RawReactionGroup,
@@ -24,6 +25,7 @@ import {
   type RawReviewThreads,
 } from "../features/pull-requests/mapping.ts";
 import type {
+  CommitRangeDiff,
   CreateReviewThreadResult,
   DeletePendingCommentResult,
   PullRequestCardModel,
@@ -48,6 +50,8 @@ const pullRequestFilesPageSize = 100;
 // GitHub lists at most 3,000 files per pull request.
 const maxPullRequestFilesPages = 30;
 const pullRequestFilesConcurrency = 4;
+// GitHub's comparison of two commits lists at most this many files.
+const maxComparedFiles = 300;
 const reviewEvents = new Set(["APPROVE", "COMMENT", "REQUEST_CHANGES"]);
 const maxGhAttempts = 2;
 
@@ -127,6 +131,17 @@ type PullRequestFilesPageGraphqlResponse = {
     repository: {
       pullRequest: {
         files: RawPullRequestFiles;
+      } | null;
+    } | null;
+  };
+  errors?: GraphqlError[];
+};
+
+type PullRequestCommitsPageGraphqlResponse = {
+  data?: {
+    repository: {
+      pullRequest: {
+        commits: RawPullRequestCommits;
       } | null;
     } | null;
   };
@@ -742,6 +757,57 @@ export async function getRepositoryFileContent(
   }
 }
 
+// The changes between two commits of a pull request, like GitHub shows for a range of its commits.
+export async function getCommitRangeDiff(
+  input: {
+    base: string;
+    head: string;
+    owner: string;
+    repo: string;
+  },
+  runGh: GhRunner = runGhCommand,
+): Promise<CommitRangeDiff> {
+  if (
+    !isRepositoryNamePart(input.owner) ||
+    !isRepositoryNamePart(input.repo) ||
+    !isCommitOid(input.base) ||
+    !isCommitOid(input.head)
+  ) {
+    throw new LocalGithubError("unknown", "A valid repository and two commits are required.", 400);
+  }
+
+  const comparePath = `repos/${input.owner}/${input.repo}/compare/${input.base}...${input.head}`;
+
+  try {
+    const diff = await getUnifiedDiff(comparePath, runGh);
+
+    if (diff) {
+      return { files: diff, isTruncated: false };
+    }
+
+    // Files are only listed on the first page of commits, so one commit per page is enough.
+    const { stdout } = await runGhCommandWithRetry(["api", `${comparePath}?per_page=1`], runGh);
+    const files = (JSON.parse(stdout) as { files?: RawPullRequestFile[] }).files ?? [];
+
+    return {
+      files: parsePullRequestFiles(files),
+      isTruncated: files.length >= maxComparedFiles,
+    };
+  } catch (error) {
+    const normalized = normalizeGhError(error);
+
+    if (normalized.status === 404) {
+      throw new LocalGithubError(
+        "repo",
+        `Commits ${input.base.slice(0, 7)} and ${input.head.slice(0, 7)} could not be compared. Refresh the PR to load its latest commits.`,
+        404,
+      );
+    }
+
+    throw normalized;
+  }
+}
+
 async function getPullRequestReviewFirstPage(
   input: {
     number: number;
@@ -779,15 +845,63 @@ async function getPullRequestReviewRemainingPages(
   pullRequest: RawPullRequestReview,
   runGh: GhRunner,
 ) {
-  const [reviewThreads, files] = await Promise.all([
+  const [reviewThreads, files, commits] = await Promise.all([
     getPullRequestReviewThreadsPages(input, pullRequest.reviewThreads, runGh),
     getPullRequestFilesPages(input, pullRequest.files, runGh),
+    getPullRequestCommitsPages(input, pullRequest.commits, runGh),
   ]);
 
   return {
     ...pullRequest,
+    commits,
     files,
     reviewThreads,
+  };
+}
+
+// The first page holds the latest commits, so earlier ones are put in front until the first commit.
+async function getPullRequestCommitsPages(
+  input: {
+    number: number;
+    owner: string;
+    repo: string;
+  },
+  lastPage: RawPullRequestCommits | undefined,
+  runGh: GhRunner,
+) {
+  if (!lastPage) {
+    return lastPage;
+  }
+
+  const nodes = [...lastPage.nodes];
+  let pageInfo = lastPage.pageInfo;
+
+  while (pageInfo.hasPreviousPage && pageInfo.startCursor) {
+    const parsed = await runGraphqlQuery<PullRequestCommitsPageGraphqlResponse>(
+      buildPullRequestCommitsPageQuery(input.number, pageInfo.startCursor),
+      {
+        owner: input.owner,
+        repo: input.repo,
+      },
+      runGh,
+    );
+    const commits = parsed.data?.repository?.pullRequest?.commits;
+
+    if (!commits) {
+      throw new LocalGithubError(
+        "repo",
+        "This pull request could not be found or is not accessible through gh.",
+        404,
+      );
+    }
+
+    nodes.unshift(...commits.nodes);
+    pageInfo = commits.pageInfo;
+  }
+
+  return {
+    nodes,
+    pageInfo,
   };
 }
 
@@ -914,14 +1028,13 @@ async function getPullRequestDiff(
   },
   runGh: GhRunner,
 ) {
+  return getUnifiedDiff(`repos/${input.owner}/${input.repo}/pulls/${input.number}`, runGh);
+}
+
+async function getUnifiedDiff(endpoint: string, runGh: GhRunner) {
   try {
     const { stdout } = await runGhCommandWithRetry(
-      [
-        "api",
-        `repos/${input.owner}/${input.repo}/pulls/${input.number}`,
-        "-H",
-        "Accept: application/vnd.github.v3.diff",
-      ],
+      ["api", endpoint, "-H", "Accept: application/vnd.github.v3.diff"],
       runGh,
     );
 
@@ -1239,7 +1352,40 @@ function buildPullRequestReviewQuery(number: number) {
           files(first: 100) {
             ${buildPullRequestFileFields()}
           }
+          commits(last: 100) {
+            ${buildPullRequestCommitFields()}
+          }
         }
+      }
+    }
+  `;
+}
+
+function buildPullRequestCommitsPageQuery(number: number, beforeCursor: string) {
+  return `
+    query PullRequestCommitsPage($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequest(number: ${number}) {
+          commits(last: 100, before: ${JSON.stringify(beforeCursor)}) {
+            ${buildPullRequestCommitFields()}
+          }
+        }
+      }
+    }
+  `;
+}
+
+function buildPullRequestCommitFields() {
+  return `
+    pageInfo {
+      hasPreviousPage
+      startCursor
+    }
+    nodes {
+      commit {
+        oid
+        committedDate
+        messageHeadline
       }
     }
   `;

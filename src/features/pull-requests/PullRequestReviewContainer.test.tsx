@@ -447,6 +447,37 @@ describe("PullRequestReviewContainer", () => {
     });
   });
 
+  test("compares the commits of a period through the local gh endpoint", async () => {
+    const daysAgo = (days: number) =>
+      new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    await writeCachedReview({
+      ...review,
+      commits: [
+        { committedDate: daysAgo(20), messageHeadline: "Start", oid: "1".repeat(40) },
+        { committedDate: daysAgo(2), messageHeadline: "Polish", oid: "a".repeat(40) },
+      ],
+      files: [reviewFile],
+      headRefOid: "a".repeat(40),
+    });
+    const fetchMock = mockFetchResponse(200, { files: [reviewFile], isTruncated: false });
+
+    renderReviewContainer();
+
+    await userEvent.click(await screen.findByRole("button", { name: "Last week" }));
+
+    expect(await screen.findByText("1 file changed, +1 -0")).toBeTruthy();
+    expect(screen.getByText(/^1 of 2 commits since/)).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/local/github/commit-range-diff");
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string)).toEqual({
+      base: "1".repeat(40),
+      head: "a".repeat(40),
+      owner: "openai",
+      repo: "pr-status",
+    });
+  });
+
   test("keeps fetched file contents for code previews", async () => {
     await writeCachedReview({
       ...review,
@@ -563,6 +594,7 @@ const review: PullRequestReviewModel = {
   additions: 1,
   changedFiles: 0,
   commentsCount: 0,
+  commits: [],
   deletions: 0,
   fileViewedStates: {},
   files: [],

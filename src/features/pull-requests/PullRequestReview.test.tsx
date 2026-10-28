@@ -2,6 +2,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { type ComponentProps, useState } from "react";
 import { describe, expect, test, vi } from "vite-plus/test";
+import { usePreferencesStore } from "../settings/preferences-store";
+import type { LoadCommitRangeDiff } from "./changes-period";
 import { parseUnifiedDiff } from "./diff-parser";
 import { PullRequestReview, type ReviewTab } from "./PullRequestReview";
 import * as styles from "./PullRequestReview.css";
@@ -978,6 +980,132 @@ describe("PullRequestReview", () => {
     expect(screen.getByText("src/review-21.ts")).toBeTruthy();
     expect(screen.getByText("src/review-22.ts")).toBeTruthy();
   });
+
+  test("reviews only the changes of the last days or weeks, and remembers the period", async () => {
+    const onLoadCommitRangeDiff = vi
+      .fn<LoadCommitRangeDiff>()
+      .mockResolvedValue({ files: recentFiles, isTruncated: false });
+
+    renderReview({ onLoadCommitRangeDiff, review: createReviewWithCommits() });
+
+    expect(getFileArticle("src/settled.ts")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All changes" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Last week" }));
+
+    expect(await screen.findByText("export const reviewed = true;")).toBeTruthy();
+    expect(onLoadCommitRangeDiff).toHaveBeenCalledWith({ base: "2".repeat(40), head: headRefOid });
+    expect(screen.getByText(/^1 of 3 commits since/)).toBeTruthy();
+    expect(screen.getByText("Settle on true")).toBeTruthy();
+    expect(screen.getByText("1 file changed, +1 -1")).toBeTruthy();
+    expect(screen.getByText(/return maybe;/)).toBeTruthy();
+    expect(screen.queryByText(/return false;/)).toBeNull();
+    expect(screen.queryByText("src/settled.ts")).toBeNull();
+    // What merges brought in from the base branch stays out of the review.
+    expect(screen.queryByText("src/merged.ts")).toBeNull();
+    expect(screen.queryByText(/fromBase/)).toBeNull();
+    expect(
+      screen.getByText(
+        "Hiding 2 changes this pull request doesn't make itself, like ones merged in from main.",
+      ),
+    ).toBeTruthy();
+
+    await userEvent.selectOptions(screen.getByRole("combobox", { name: "Period unit" }), "days");
+
+    expect(screen.getByText(/^No commits in the last day/)).toBeTruthy();
+    expect(screen.queryByText("src/review.ts")).toBeNull();
+
+    const amount = screen.getByRole("spinbutton", { name: "Number of days" });
+
+    await userEvent.clear(amount);
+    await userEvent.type(amount, "30");
+
+    expect(screen.getByText(/^3 of 3 commits since/)).toBeTruthy();
+    expect(getFileArticle("src/settled.ts")).toBeTruthy();
+    expect(within(getFileArticle("src/review.ts")).getByText(/return false;/)).toBeTruthy();
+    expect(usePreferencesStore.getState().preferences.changesPeriod).toEqual({
+      amount: 30,
+      unit: "days",
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "All changes" }));
+
+    expect(screen.queryByText(/commits since/)).toBeNull();
+    expect(getFileArticle("src/settled.ts")).toBeTruthy();
+  });
+
+  test("keeps comments to lines the pull request's diff shows, and threads to the lines shown", async () => {
+    const onCreateThread = vi.fn().mockResolvedValue(undefined);
+
+    renderReview({
+      onCreateThread,
+      onLoadCommitRangeDiff: vi
+        .fn<LoadCommitRangeDiff>()
+        .mockResolvedValue({ files: recentFiles, isTruncated: false }),
+      review: createReviewWithCommits(),
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Add comment on src/review.ts:2 (old)" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Old discussion further down.")).toBeTruthy();
+
+    await userEvent.click(screen.getByRole("button", { name: "Last week" }));
+    await screen.findByText("export const reviewed = true;");
+
+    expect(
+      screen.queryByRole("button", { name: "Add comment on src/review.ts:2 (old)" }),
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add comment on src/review.ts:4" })).toBeNull();
+    expect(screen.getByText("This branch needs a guard.")).toBeTruthy();
+    expect(screen.queryByText("Old discussion further down.")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Add comment on src/review.ts:2" }));
+    await userEvent.type(screen.getByLabelText("New comment on src/review.ts:2"), "Why true?");
+    await userEvent.click(screen.getByRole("button", { name: "Add single comment" }));
+
+    expect(onCreateThread).toHaveBeenCalledWith({
+      body: "Why true?",
+      line: 2,
+      path: "src/review.ts",
+      publish: true,
+      pullRequestId: "pr-1",
+      side: "RIGHT",
+    });
+  });
+
+  test("retries a period whose changes failed to load, and flags a partial list", async () => {
+    const onLoadCommitRangeDiff = vi
+      .fn<LoadCommitRangeDiff>()
+      .mockRejectedValueOnce(new Error("GitHub could not compare these commits."))
+      .mockResolvedValue({ files: recentFiles, isTruncated: true });
+
+    renderReview({ onLoadCommitRangeDiff, review: createReviewWithCommits() });
+
+    await userEvent.click(screen.getByRole("button", { name: "Last week" }));
+
+    expect(await screen.findByText("GitHub could not compare these commits.")).toBeTruthy();
+    expect(screen.queryByText("src/review.ts")).toBeNull();
+
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(await screen.findByText("export const reviewed = true;")).toBeTruthy();
+    expect(screen.getByText(/GitHub lists at most 300 files when comparing commits/)).toBeTruthy();
+    expect(onLoadCommitRangeDiff).toHaveBeenCalledTimes(2);
+  });
+
+  test("asks for a refresh when a saved review has no commits", async () => {
+    const onLoadCommitRangeDiff = vi.fn<LoadCommitRangeDiff>();
+
+    renderReview({ onLoadCommitRangeDiff });
+
+    await userEvent.click(screen.getByRole("button", { name: "Last week" }));
+
+    expect(screen.getByText(/Refresh the PR to see what changed in the last week/)).toBeTruthy();
+    expect(onLoadCommitRangeDiff).not.toHaveBeenCalled();
+  });
 });
 
 function renderReview(
@@ -985,6 +1113,7 @@ function renderReview(
     onCreateThread: (input: CreatePullRequestReviewThreadInput) => Promise<unknown>;
     onDeletePendingComment: (commentId: string) => Promise<unknown>;
     onDiscardReview: () => Promise<unknown>;
+    onLoadCommitRangeDiff: LoadCommitRangeDiff;
     onLoadFileContent: LoadFileContent;
     onReply: ComponentProps<typeof PullRequestReview>["onReply"];
     onSetResolved: (threadId: string, isResolved: boolean) => Promise<unknown>;
@@ -1009,6 +1138,10 @@ function renderReview(
         overrides.onDeletePendingComment ?? vi.fn().mockResolvedValue(undefined)
       }
       onDiscardReview={overrides.onDiscardReview ?? vi.fn().mockResolvedValue(undefined)}
+      onLoadCommitRangeDiff={
+        overrides.onLoadCommitRangeDiff ??
+        vi.fn<LoadCommitRangeDiff>().mockRejectedValue(new Error("Not available in this test."))
+      }
       onLoadFileContent={
         overrides.onLoadFileContent ??
         vi.fn<LoadFileContent>().mockRejectedValue(new Error("Not available in this test."))
@@ -1226,12 +1359,67 @@ function createReviewWithLongCommentContext(): PullRequestReviewModel {
   };
 }
 
+// Commits made 20, 10, and 2 days ago, and a thread further down a file than the diffs reach.
+function createReviewWithCommits(): PullRequestReviewModel {
+  const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  return {
+    ...review,
+    changedFiles: 2,
+    commits: [
+      { committedDate: daysAgo(20), messageHeadline: "Start the review", oid: "1".repeat(40) },
+      { committedDate: daysAgo(10), messageHeadline: "Guard the branch", oid: "2".repeat(40) },
+      { committedDate: daysAgo(2), messageHeadline: "Settle on true", oid: headRefOid },
+    ],
+    files: [review.files[0], createDiffFile("src/settled.ts", 1, 1)],
+    threads: [
+      ...review.threads,
+      {
+        ...review.threads[0],
+        comments: [
+          createComment({
+            body: "Old discussion further down.",
+            id: "comment-3",
+            line: 10,
+            originalLine: 10,
+          }),
+        ],
+        id: "thread-3",
+        line: 10,
+        originalLine: 10,
+      },
+    ],
+  };
+}
+
+// What the last week changed: a line the PR changes, then what a merge brought in from the base.
+const recentFiles = parseUnifiedDiff(`diff --git a/src/review.ts b/src/review.ts
+--- a/src/review.ts
++++ b/src/review.ts
+@@ -1,4 +1,4 @@
+ export function review() {
+-return maybe;
++return true;
+ }
+ export const reviewed = true;
+@@ -20,1 +20,1 @@
+-export const fromBase = false;
++export const fromBase = true;
+diff --git a/src/merged.ts b/src/merged.ts
+--- a/src/merged.ts
++++ b/src/merged.ts
+@@ -1 +1 @@
+-export const merged = false;
++export const merged = true;
+`);
+
 const miraAvatarUrl = "https://avatars.githubusercontent.com/u/2?s=64&v=4";
 
 const review: PullRequestReviewModel = {
   additions: 1,
   changedFiles: 1,
   commentsCount: 2,
+  commits: [],
   deletions: 1,
   fileViewedStates: {},
   files: [

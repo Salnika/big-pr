@@ -10,6 +10,7 @@ import {
   createPullRequestReviewThread,
   deletePendingComment,
   discardPendingReview,
+  fetchCommitRangeDiff,
   fetchRepositoryFileContent,
   replyToPullRequestReviewThread,
   setPullRequestCommentReaction,
@@ -217,6 +218,16 @@ export function PullRequestReviewContainer({
       }),
     [owner, pullRequestNumber, queryClient, repo],
   );
+  const loadCommitRangeDiff = useCallback(
+    (range: { base: string; head: string }) =>
+      queryClient.fetchQuery({
+        queryKey: ["commit-range-diff", owner, repo, pullRequestNumber, range.base, range.head],
+        queryFn: () => fetchCommitRangeDiff({ owner, repo }, range),
+        // Two given commits always differ the same way.
+        staleTime: Infinity,
+      }),
+    [owner, pullRequestNumber, queryClient, repo],
+  );
 
   useDocumentTitle(
     [
@@ -304,6 +315,7 @@ export function PullRequestReviewContainer({
           ? discardReviewMutation.mutateAsync({ pullRequestReviewId: pendingReviewId })
           : Promise.reject(new Error("Refresh the PR to find the pending review to discard."))
       }
+      onLoadCommitRangeDiff={loadCommitRangeDiff}
       onLoadFileContent={loadFileContent}
       onRefresh={review.refresh}
       onReply={(threadId, body, addToReview) =>

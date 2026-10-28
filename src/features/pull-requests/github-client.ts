@@ -1,5 +1,6 @@
 import type { RepoSettings } from "../settings/repo-parser";
 import type {
+  CommitRangeDiff,
   CreatePullRequestReviewThreadInput,
   CreateReviewThreadResult,
   DeletePendingCommentInput,
@@ -30,6 +31,7 @@ const githubLocalCreateThreadEndpoint = "/api/local/github/review-threads";
 const githubLocalReplyEndpoint = "/api/local/github/review-thread-replies";
 const githubLocalResolutionEndpoint = "/api/local/github/review-thread-resolution";
 const githubLocalFileContentEndpoint = "/api/local/github/file-content";
+const githubLocalCommitRangeDiffEndpoint = "/api/local/github/commit-range-diff";
 const githubLocalReactionEndpoint = "/api/local/github/comment-reactions";
 const githubLocalFileViewedEndpoint = "/api/local/github/file-viewed-state";
 const githubLocalReviewSubmissionEndpoint = "/api/local/github/review-submissions";
@@ -114,6 +116,18 @@ export async function fetchRepositoryFileContent(
     owner: repository.owner,
     path: input.path,
     ref: input.ref,
+    repo: repository.repo,
+  });
+}
+
+export async function fetchCommitRangeDiff(
+  repository: Pick<RepoSettings, "owner" | "repo">,
+  input: { base: string; head: string },
+): Promise<CommitRangeDiff> {
+  return postGithubLocalApi<CommitRangeDiff>(githubLocalCommitRangeDiffEndpoint, {
+    base: input.base,
+    head: input.head,
+    owner: repository.owner,
     repo: repository.repo,
   });
 }

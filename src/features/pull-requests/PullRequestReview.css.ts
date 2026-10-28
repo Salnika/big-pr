@@ -99,6 +99,13 @@ export const tabs = style({
   flexWrap: "wrap",
 });
 
+export const toolbar = style({
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: vars.space[12],
+});
+
 export const segmentGroup = style({
   display: "inline-flex",
   border: `1px solid ${vars.color.border}`,

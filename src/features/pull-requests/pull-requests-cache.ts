@@ -31,6 +31,7 @@ type StoredThread = Omit<PullRequestReviewThread, "comments" | "diffHunk" | "ori
     comments: StoredComment[];
   };
 type ReviewFieldsAddedLater =
+  | "commits"
   | "fileViewedStates"
   | "headRefOid"
   | "pendingReviewId"
@@ -221,6 +222,7 @@ function normalizePullRequest(pullRequest: StoredPullRequest): PullRequestCardMo
 function normalizeReview(review: StoredReview): PullRequestReviewModel {
   return {
     ...review,
+    commits: review.commits ?? [],
     fileViewedStates: review.fileViewedStates ?? {},
     headRefOid: review.headRefOid ?? null,
     pendingReviewId: review.pendingReviewId ?? null,

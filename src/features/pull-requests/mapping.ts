@@ -115,9 +115,24 @@ export type RawPullRequestFiles = {
   totalCount?: number;
 };
 
+export type RawPullRequestCommits = {
+  nodes: Array<{
+    commit: {
+      committedDate: string;
+      messageHeadline: string;
+      oid: string;
+    };
+  }>;
+  pageInfo: {
+    hasPreviousPage: boolean;
+    startCursor?: string | null;
+  };
+};
+
 export type RawPullRequestReview = RawPullRequestBase & {
   additions: number;
   changedFiles: number;
+  commits?: RawPullRequestCommits;
   deletions: number;
   files?: RawPullRequestFiles;
   headRefOid?: string | null;
@@ -227,6 +242,11 @@ export function mapPullRequestReview(
     additions: pr.additions,
     changedFiles: pr.changedFiles,
     commentsCount: threads.reduce((count, thread) => count + thread.comments.length, 0),
+    commits: (pr.commits?.nodes ?? []).map(({ commit }) => ({
+      committedDate: commit.committedDate,
+      messageHeadline: commit.messageHeadline,
+      oid: commit.oid,
+    })),
     deletions: pr.deletions,
     fileViewedStates: Object.fromEntries(
       (pr.files?.nodes ?? []).map((file) => [
